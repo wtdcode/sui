@@ -19,9 +19,11 @@ pub use files::Files;
 
 use thiserror::Error;
 
+use crate::dependency::FetchError;
 use crate::dependency::ResolverError;
 use crate::git::GitError;
 use crate::graph::LinkageError;
+use crate::graph::RenameError;
 use crate::package::manifest::ManifestError;
 use crate::package::paths::PackagePathError;
 
@@ -63,6 +65,12 @@ pub enum PackageError {
 
     #[error(transparent)]
     Linkage(#[from] LinkageError),
+
+    #[error(transparent)]
+    RenameFrom(#[from] RenameError),
+
+    #[error(transparent)]
+    FetchError(#[from] FetchError),
 }
 
 impl PackageError {

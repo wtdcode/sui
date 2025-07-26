@@ -108,6 +108,9 @@ mod test {
 
     #[sim_test(config = "test_config()")]
     async fn test_testnet_config() {
+        if sui_simulator::has_mainnet_protocol_config_override() {
+            return;
+        }
         chain_config_smoke_test(Chain::Testnet).await;
     }
 
@@ -709,9 +712,11 @@ mod test {
 
     #[sim_test(config = "test_config()")]
     async fn test_simulated_load_mysticeti_fastpath() {
-        unsafe {
-            std::env::set_var("TRANSACTION_DRIVER", "100");
+        if sui_simulator::has_mainnet_protocol_config_override() {
+            return;
         }
+
+        std::env::set_var("TRANSACTION_DRIVER", "100");
 
         let test_cluster = build_test_cluster(4, 30_000, 1).await;
         test_simulated_load(test_cluster, 120).await;
@@ -1041,6 +1046,7 @@ mod test {
             })
             .with_submit_delay_step_override_millis(3000)
             .with_num_unpruned_validators(default_num_of_unpruned_validators)
+            .disable_fullnode_pruning()
             .build()
             .await
             .into()

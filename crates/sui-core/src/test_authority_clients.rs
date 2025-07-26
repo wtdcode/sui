@@ -8,7 +8,9 @@ use std::{
     time::Duration,
 };
 
-use crate::{authority::AuthorityState, authority_client::AuthorityAPI};
+use crate::{
+    authority::AuthorityState, authority_client::AuthorityAPI, transaction_driver::SubmitTxResponse,
+};
 use crate::{
     authority::{test_authority_builder::TestAuthorityBuilder, ExecutionEnv},
     execution_scheduler::ExecutionSchedulerAPI,
@@ -111,9 +113,7 @@ impl AuthorityAPI for LocalAuthorityClient {
             index: 0,
         };
 
-        Ok(RawSubmitTxResponse {
-            consensus_position: consensus_position.into_raw()?,
-        })
+        SubmitTxResponse::Submitted { consensus_position }.try_into()
     }
 
     async fn handle_transaction(
@@ -292,7 +292,7 @@ impl LocalAuthorityClient {
                     )],
                     &epoch_store,
                 );
-                let effects = state.notify_read_effects(*certificate.digest()).await?;
+                let effects = state.notify_read_effects("", *certificate.digest()).await?;
                 state.sign_effects(effects, &epoch_store)?
             }
         }

@@ -63,6 +63,7 @@ use std::sync::Arc;
 use sui_config::ExecutionCacheConfig;
 use sui_macros::fail_point;
 use sui_protocol_config::ProtocolVersion;
+use sui_types::accumulator_event::AccumulatorEvent;
 use sui_types::base_types::{
     EpochId, FullObjectID, ObjectID, ObjectRef, SequenceNumber, VerifiedExecutionData,
 };
@@ -1262,7 +1263,7 @@ impl WritebackCache {
         self.cache_latest_object_by_id(object_id, LatestObjectCacheEntry::NonExistent, ticket);
     }
 
-    fn clear_state_end_of_epoch_impl(&self, _execution_guard: &ExecutionLockWriteGuard<'_>) {
+    fn clear_state_end_of_epoch_impl(&self, execution_guard: &ExecutionLockWriteGuard<'_>) {
         info!("clearing state at end of epoch");
         assert!(
             self.dirty.pending_transaction_writes.is_empty(),
@@ -1271,6 +1272,10 @@ impl WritebackCache {
         self.dirty.clear();
         info!("clearing old transaction locks");
         self.object_locks.clear();
+        info!("clearing object per epoch marker table");
+        self.store
+            .clear_object_per_epoch_marker_table(execution_guard)
+            .expect("db error");
     }
 
     fn revert_state_update_impl(&self, tx: &TransactionDigest) {
@@ -1845,15 +1850,19 @@ impl ObjectCacheRead for WritebackCache {
         &'a self,
         input_and_receiving_keys: &'a [InputKey],
         receiving_keys: &'a HashSet<InputKey>,
-        epoch: &'a EpochId,
+        epoch: EpochId,
     ) -> BoxFuture<'a, ()> {
         self.object_notify_read
-            .read(input_and_receiving_keys, |keys| {
-                self.multi_input_objects_available(keys, receiving_keys, epoch)
-                    .into_iter()
-                    .map(|available| if available { Some(()) } else { None })
-                    .collect::<Vec<_>>()
-            })
+            .read(
+                "notify_read_input_objects",
+                input_and_receiving_keys,
+                move |keys| {
+                    self.multi_input_objects_available(keys, receiving_keys, epoch)
+                        .into_iter()
+                        .map(|available| if available { Some(()) } else { None })
+                        .collect::<Vec<_>>()
+                },
+            )
             .map(|_| ())
             .boxed()
     }
@@ -2052,10 +2061,11 @@ impl TransactionCacheRead for WritebackCache {
 
     fn notify_read_executed_effects_digests<'a>(
         &'a self,
+        task_name: &'static str,
         digests: &'a [TransactionDigest],
     ) -> BoxFuture<'a, Vec<TransactionEffectsDigest>> {
         self.executed_effects_digests_notify_read
-            .read(digests, |digests| {
+            .read(task_name, digests, |digests| {
                 self.multi_get_executed_effects_digests(digests)
             })
             .boxed()
@@ -2144,13 +2154,24 @@ impl TransactionCacheRead for WritebackCache {
         tx_digests: &'a [TransactionDigest],
     ) -> BoxFuture<'a, Vec<Arc<TransactionOutputs>>> {
         self.fastpath_transaction_outputs_notify_read
-            .read(tx_digests, |tx_digests| {
-                tx_digests
-                    .iter()
-                    .map(|tx_digest| self.get_mysticeti_fastpath_outputs(tx_digest))
-                    .collect()
-            })
+            .read(
+                "notify_read_fastpath_transaction_outputs",
+                tx_digests,
+                |tx_digests| {
+                    tx_digests
+                        .iter()
+                        .map(|tx_digest| self.get_mysticeti_fastpath_outputs(tx_digest))
+                        .collect()
+                },
+            )
             .boxed()
+    }
+
+    fn take_accumulator_events(&self, digest: &TransactionDigest) -> Option<Vec<AccumulatorEvent>> {
+        self.dirty
+            .pending_transaction_writes
+            .get(digest)
+            .map(|transaction_output| transaction_output.take_accumulator_events())
     }
 }
 

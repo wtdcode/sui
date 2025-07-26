@@ -6,7 +6,6 @@ use crate::crypto::{AuthoritySignInfo, AuthorityStrongQuorumSignInfo};
 use crate::effects::{
     SignedTransactionEffects, TransactionEvents, VerifiedSignedTransactionEffects,
 };
-use crate::messages_consensus::ConsensusPosition;
 use crate::object::Object;
 use crate::transaction::{CertifiedTransaction, SenderSignedData, SignedTransaction};
 use bytes::Bytes;
@@ -230,22 +229,31 @@ pub struct RawSubmitTxRequest {
 #[derive(Clone, prost::Message)]
 pub struct RawSubmitTxResponse {
     // Serialized Consensus Position
-    #[prost(bytes = "bytes", tag = "1")]
-    pub consensus_position: Bytes,
+    #[prost(oneof = "RawValidatorSubmitStatus", tags = "1, 2, 3")]
+    pub inner: Option<RawValidatorSubmitStatus>,
 }
 
-#[derive(Clone, Debug)]
-pub struct SubmitTxResponse {
-    pub consensus_position: ConsensusPosition,
+#[derive(Clone, prost::Oneof)]
+pub enum RawValidatorSubmitStatus {
+    // Serialized Consensus Position.
+    #[prost(bytes = "bytes", tag = "1")]
+    Submitted(Bytes),
+
+    // Transaction has already been executed (finalized).
+    #[prost(message, tag = "2")]
+    Executed(RawExecutedStatus),
 }
 
 #[derive(Clone, prost::Message)]
 pub struct RawWaitForEffectsRequest {
     #[prost(bytes = "bytes", tag = "1")]
-    pub consensus_position: Bytes,
-
-    #[prost(bytes = "bytes", tag = "2")]
     pub transaction_digest: Bytes,
+
+    /// If provided, wait for the consensus position to execute and wait for fastpath outputs of the transaction,
+    /// in addition to waiting for finalized effects.
+    /// If not provided, only wait for finalized effects.
+    #[prost(bytes = "bytes", optional, tag = "2")]
+    pub consensus_position: Option<Bytes>,
 
     /// Whether to include details of the effects,
     /// including the effects content, events, input objects, and output objects.
@@ -295,25 +303,8 @@ pub struct RawExecutedData {
 
 #[derive(Clone, prost::Message)]
 pub struct RawRejectedStatus {
-    #[prost(enumeration = "RawRejectReason", tag = "1")]
-    pub reason: i32,
-    #[prost(string, optional, tag = "2")]
-    pub message: Option<String>, // Only for string-carrying variants
-}
-
-#[derive(Clone, Debug, prost::Enumeration)]
-#[repr(i32)]
-pub enum RawRejectReason {
-    // Transaction is not voted to be rejected locally.
-    None = 0,
-    // Rejected due to lock conflict.
-    LockConflict = 1,
-    // Rejected due to package verification.
-    PackageVerification = 2,
-    // Rejected due to overload.
-    Overload = 3,
-    // Rejected due to coin deny list.
-    CoinDenyList = 4,
+    #[prost(bytes = "bytes", tag = "1")]
+    pub error: Bytes,
 }
 
 #[derive(Clone, prost::Message)]
