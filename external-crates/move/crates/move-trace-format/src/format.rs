@@ -13,6 +13,7 @@ use move_core_types::{
     account_address::AccountAddress,
     language_storage::{ModuleId, TypeTag},
 };
+use move_vm_stack::Stack;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::{fmt::Display, sync::mpsc::Receiver};
@@ -343,6 +344,7 @@ impl<'a> MoveTraceBuilder<'a> {
         locals_types: Vec<TypeTagWithRefs>,
         is_native: bool,
         gas_left: u64,
+        stack: &Stack
     ) {
         let frame = Box::new(Frame {
             frame_id,
@@ -356,16 +358,16 @@ impl<'a> MoveTraceBuilder<'a> {
             locals_types,
             is_native,
         });
-        self.push_event(TraceEvent::OpenFrame { frame, gas_left });
+        self.push_event(TraceEvent::OpenFrame { frame, gas_left }, stack);
     }
 
     /// Record a `CloseFrame` event in the trace.
-    pub fn close_frame(&mut self, frame_id: TraceIndex, return_: Vec<TraceValue>, gas_left: u64) {
+    pub fn close_frame(&mut self, frame_id: TraceIndex, return_: Vec<TraceValue>, gas_left: u64, stack: &Stack) {
         self.push_event(TraceEvent::CloseFrame {
             frame_id,
             return_,
             gas_left,
-        });
+        }, stack);
     }
 
     /// Record an `Instruction` event in the trace along with the effects of the instruction.
@@ -376,28 +378,29 @@ impl<'a> MoveTraceBuilder<'a> {
         effects: Vec<Effect>,
         gas_left: u64,
         pc: u16,
+        stack: &Stack
     ) {
         self.push_event(TraceEvent::Instruction {
             type_parameters,
             pc,
             gas_left,
             instruction: instruction.clone(),
-        });
+        }, stack);
         for effect in effects {
-            self.push_event(TraceEvent::Effect(Box::new(effect)));
+            self.push_event(TraceEvent::Effect(Box::new(effect)), stack);
         }
     }
 
     /// Push an `Effect` event to the trace.
-    pub fn effect(&mut self, effect: Effect) {
-        self.push_event(TraceEvent::Effect(Box::new(effect)));
+    pub fn effect(&mut self, effect: Effect, stack: &Stack) {
+        self.push_event(TraceEvent::Effect(Box::new(effect)), stack);
     }
 
     // All events pushed to the trace are first pushed, and then the tracer is notified of the
     // event.
-    pub fn push_event(&mut self, event: TraceEvent) {
+    pub fn push_event(&mut self, event: TraceEvent, stack: &Stack) {
         self.trace.push_event(event.clone());
-        self.tracer.notify(&event, Writer(&mut self.trace));
+        self.tracer.notify(&event, Writer(&mut self.trace), stack);
     }
 }
 
@@ -525,11 +528,12 @@ impl<R: std::io::Read> Iterator for MoveTraceReader<'_, R> {
 #[test]
 fn emit_trace() {
     let mut builder = MoveTraceBuilder::new();
+    let mut stack = Stack::new();
     for i in 0..10 {
         builder.push_event(TraceEvent::External(Box::new(serde_json::json!({
             "event": "external",
             "data": i,
-        }))));
+        }))), &stack);
     }
 
     let bytes = builder.into_trace().into_compressed_json_bytes();
@@ -542,5 +546,59 @@ fn emit_trace() {
             panic!("unexpected event: {:?}", event);
         };
         assert_eq!(event.get("data").unwrap().as_u64().unwrap(), i as u64);
+    }
+}
+
+// Make sure that we can handle large numeric values in the trace (both ser and deser) as in the
+// previous value format that we used in the trace we needed to handle large numeric values
+// (e.g., u256, u128, u64) that are larger than what serde_json can handle natively with `Number`.
+// Since we switched to a typed value format, this is no longer an issue, but we should test to
+// make sure that we can still serialize and deserialize these values correctly and prevent any
+// possible regressions.
+#[test]
+fn large_numeric_values_in_trace() {
+    use move_core_types::u256;
+    let mut builder = MoveTraceBuilder::new();
+    let stack = Stack::new();
+    let effects = vec![
+        Effect::Push(TraceValue::RuntimeValue {
+            value: SerializableMoveValue::U256(u256::U256::max_value()),
+        }),
+        Effect::Push(TraceValue::RuntimeValue {
+            value: SerializableMoveValue::U128(u128::MAX),
+        }),
+        Effect::Push(TraceValue::RuntimeValue {
+            value: SerializableMoveValue::U64(u64::MAX),
+        }),
+    ];
+
+    for eff in effects {
+        builder.push_event(TraceEvent::Effect(Box::new(eff)), &stack);
+    }
+
+    let bytes = builder.into_trace().into_compressed_json_bytes();
+
+    let reader = MoveTraceReader::new(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(reader.version, TRACE_VERSION);
+
+    for event in reader {
+        let event = event.unwrap();
+        let TraceEvent::Effect(event) = event else {
+            panic!("unexpected event: {:?}", event);
+        };
+
+        let Effect::Push(value) = &*event else {
+            panic!("expected Push event, got: {:?}", event);
+        };
+
+        match value {
+            TraceValue::RuntimeValue { value } => match value {
+                SerializableMoveValue::U256(v) => assert_eq!(*v, u256::U256::max_value()),
+                SerializableMoveValue::U128(v) => assert_eq!(*v, u128::MAX),
+                SerializableMoveValue::U64(v) => assert_eq!(*v, u64::MAX),
+                _ => panic!("unexpected value type: {:?}", value),
+            },
+            _ => panic!("expected RuntimeValue, got: {:?}", value),
+        }
     }
 }

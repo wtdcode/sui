@@ -244,6 +244,7 @@ pub mod shared_object_congestion_tracker;
 pub mod shared_object_version_manager;
 pub mod test_authority_builder;
 pub mod transaction_deferral;
+pub mod transaction_reject_reason_cache;
 mod weighted_moving_average;
 
 pub(crate) mod authority_store;
@@ -3909,7 +3910,7 @@ impl AuthorityState {
             None => {
                 debug_fatal!(
                     "Object with in parent_entry is missing from object store, datastore is \
-                     inconsistent",
+                     inconsistent"
                 );
                 Err(UserInputError::ObjectNotFound {
                     object_id: *object_id,

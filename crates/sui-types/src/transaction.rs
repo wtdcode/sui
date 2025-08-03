@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::{base_types::*, error::*, SUI_BRIDGE_OBJECT_ID};
-use crate::accumulator_root::derive_balance_account_object_id;
+use crate::accumulator_root::AccumulatorValue;
 use crate::authenticator_state::ActiveJwk;
+use crate::balance::Balance;
 use crate::committee::{Committee, EpochId, ProtocolVersion};
 use crate::crypto::{
     default_hash, AuthoritySignInfo, AuthoritySignInfoTrait, AuthoritySignature,
@@ -134,6 +135,20 @@ pub enum Reservation {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum WithdrawTypeParam {
     Balance(TypeInput),
+}
+
+impl WithdrawTypeParam {
+    pub fn get_type_tag(&self) -> UserInputResult<TypeTag> {
+        match self {
+            WithdrawTypeParam::Balance(type_param) => {
+                Ok(Balance::type_tag(type_param.to_type_tag().map_err(
+                    |e| UserInputError::InvalidWithdrawReservation {
+                        error: e.to_string(),
+                    },
+                )?))
+            }
+        }
+    }
 }
 
 // TODO(address-balances): Rename all the related structs and enums.
@@ -1861,23 +1876,6 @@ impl TransactionData {
 
     pub fn new_transfer(
         recipient: SuiAddress,
-        object_ref: ObjectRef,
-        sender: SuiAddress,
-        gas_payment: ObjectRef,
-        gas_budget: u64,
-        gas_price: u64,
-    ) -> Self {
-        let pt = {
-            let mut builder = ProgrammableTransactionBuilder::new();
-            builder.transfer_object(recipient, object_ref).unwrap();
-            builder.finish()
-        };
-        Self::new_programmable(sender, vec![gas_payment], pt, gas_budget, gas_price)
-    }
-
-    // TODO: Merge with `new_transfer` above and update existing callers.
-    pub fn new_transfer_full(
-        recipient: SuiAddress,
         full_object_ref: FullObjectRef,
         sender: SuiAddress,
         gas_payment: ObjectRef,
@@ -1886,9 +1884,7 @@ impl TransactionData {
     ) -> Self {
         let pt = {
             let mut builder = ProgrammableTransactionBuilder::new();
-            builder
-                .transfer_object_full(recipient, full_object_ref)
-                .unwrap();
+            builder.transfer_object(recipient, full_object_ref).unwrap();
             builder.finish()
         };
         Self::new_programmable(sender, vec![gas_payment], pt, gas_budget, gas_price)
@@ -2362,10 +2358,11 @@ impl TransactionDataAPI for TransactionDataV1 {
                 }
             }
             let WithdrawFrom::Sender = withdraw.withdraw_from;
-            let account_id = derive_balance_account_object_id(self.sender(), withdraw.type_param)
-                .map_err(|e| UserInputError::InvalidWithdrawReservation {
-                error: e.to_string(),
-            })?;
+            let account_id =
+                AccumulatorValue::get_field_id(self.sender(), &withdraw.type_param.get_type_tag()?)
+                    .map_err(|e| UserInputError::InvalidWithdrawReservation {
+                        error: e.to_string(),
+                    })?;
             let entry = withdraw_map.entry(account_id);
             match entry {
                 Entry::Vacant(vacant) => {
