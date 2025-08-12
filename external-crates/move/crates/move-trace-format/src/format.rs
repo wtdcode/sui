@@ -178,6 +178,12 @@ pub enum TraceEvent {
         gas_left: u64,
         instruction: Bytecode,
     },
+    BeforeInstruction {
+        type_parameters: Vec<TypeTag>,
+        pc: u16,
+        gas_left: u64,
+        instruction: Bytecode,
+    },
     Effect(Box<Effect>),
     External(Box<serde_json::Value>),
 }
@@ -391,6 +397,25 @@ impl<'a> MoveTraceBuilder<'a> {
         for effect in effects {
             self.push_event_runtime(TraceEvent::Effect(Box::new(effect)), Some(stack));
         }
+    }
+
+    /// Record an `BeforeInstruction` event before the beginning of the instruction.
+    pub fn before_instruction(
+        &mut self,
+        instruction: &Bytecode,
+        type_parameters: Vec<TypeTag>,
+        gas_left: u64,
+        pc: u16,
+        stack: &Stack
+    ) {
+        self.push_event_runtime(TraceEvent::BeforeInstruction {
+            type_parameters,
+            pc,
+            gas_left,
+            instruction: instruction.clone(),
+        },
+            Some(stack)
+        );
     }
 
     /// Push an `Effect` event to the trace.

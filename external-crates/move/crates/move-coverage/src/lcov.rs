@@ -182,7 +182,7 @@ impl PackageRecordKeeper {
                     current_record_id.pop();
                     coming_from = None;
                 }
-                TraceEvent::Effect(_) | TraceEvent::External(_) => (),
+                TraceEvent::Effect(_) | TraceEvent::External(_) | TraceEvent::BeforeInstruction { .. } => (),
             }
         }
     }
