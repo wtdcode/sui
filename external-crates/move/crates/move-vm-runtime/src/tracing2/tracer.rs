@@ -904,7 +904,7 @@ impl VMTracer<'_, '_> {
         frame: &Frame,
         interpreter: &Interpreter,
         loader: &Loader,
-        _remaining_gas: u64,
+        remaining_gas: u64,
     ) -> Option<()> {
         use move_binary_format::file_format::Bytecode as B;
 
@@ -928,7 +928,9 @@ impl VMTracer<'_, '_> {
             pc,
         );
 
-        match &frame.function.code()[pc as usize] {
+        let mut type_parameters = vec![];
+        let instruction = &frame.function.code()[pc as usize];
+        match instruction {
             B::Nop
             | B::Branch(_)
             | B::Ret
@@ -943,10 +945,16 @@ impl VMTracer<'_, '_> {
             | B::LdConst(_) => {
                 self.register_pre_effects(vec![]);
             }
+            B::MutBorrowFieldGeneric(_)
+            | B::ImmBorrowFieldGeneric(_) => {
+                let value_ty = self.type_stack.pop()?;
+                let MoveTypeLayout::Struct(slayout) = &value_ty.layout else {
+                    panic!("Expected struct, got {:?}", value_ty.layout)
+                };
+                type_parameters = slayout.type_.type_params.clone()
+            }
             B::MutBorrowField(_)
             | B::ImmBorrowField(_)
-            | B::MutBorrowFieldGeneric(_)
-            | B::ImmBorrowFieldGeneric(_)
             | B::FreezeRef
             | B::Not
             | B::Abort
@@ -1038,6 +1046,13 @@ impl VMTracer<'_, '_> {
             B::PackGeneric(sidx) => {
                 let resolver = frame.function.get_resolver(self.link_context(), loader);
                 let field_count = resolver.field_instantiation_count(*sidx) as usize;
+                let struct_type = resolver
+                    .instantiate_struct_type(*sidx, &frame.ty_args)
+                    .ok()?;
+                let TypeTag::Struct(s_type) = loader.type_to_type_tag(&struct_type).ok()? else {
+                    panic!("Expected struct, got {:#?}", struct_type);
+                };
+                type_parameters = s_type.type_params.clone();
                 self.register_pre_effects(popn(field_count)?);
             }
             B::PackVariant(vidx) => {
@@ -1077,6 +1092,7 @@ impl VMTracer<'_, '_> {
             | B::ImmBorrowGlobalDeprecated(_)
             | B::ImmBorrowGlobalGenericDeprecated(_) => unreachable!(),
         }
+        self.trace.before_instruction(instruction, type_parameters, remaining_gas, pc, &interpreter.operand_stack);
         Some(())
     }
 

@@ -122,7 +122,7 @@ impl TraceState {
             // External events are treated opaqeuly
             TraceEvent::External(_) => (),
             // Instructions
-            TraceEvent::Instruction { .. } => (),
+            TraceEvent::Instruction { .. } | TraceEvent::BeforeInstruction { .. } => (),
         }
     }
 
