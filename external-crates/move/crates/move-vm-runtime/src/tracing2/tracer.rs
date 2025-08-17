@@ -947,7 +947,7 @@ impl VMTracer<'_, '_> {
             }
             B::MutBorrowFieldGeneric(_)
             | B::ImmBorrowFieldGeneric(_) => {
-                let value_ty = self.type_stack.pop()?;
+                let value_ty = self.type_stack.last()?;
                 let MoveTypeLayout::Struct(slayout) = &value_ty.layout else {
                     panic!("Expected struct, got {:?}", value_ty.layout)
                 };
