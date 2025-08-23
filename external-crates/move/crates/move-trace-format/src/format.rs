@@ -195,8 +195,8 @@ pub struct TraceVersionData {
 
 pub struct BufferedEventStream {
     pub event_count: TraceIndex,
-    handle: std::thread::JoinHandle<Vec<u8>>,
-    sender: std::sync::mpsc::SyncSender<TraceEvent>,
+    // handle: std::thread::JoinHandle<Vec<u8>>,
+    // sender: std::sync::mpsc::SyncSender<TraceEvent>,
 }
 
 pub struct MoveTrace {
@@ -240,49 +240,50 @@ impl TraceValue {
 
 impl BufferedEventStream {
     pub fn new() -> Self {
-        let (tx, rx): (_, Receiver<TraceEvent>) =
-            std::sync::mpsc::sync_channel(CHANNEL_BUFFER_SIZE);
-        let handle = std::thread::spawn(move || {
-            use std::io::Write;
-            let mut events = zstd::stream::Encoder::new(Vec::new(), COMPRESSION_LEVEL).unwrap();
-            serde_json::to_writer(
-                &mut events,
-                &TraceVersionData {
-                    version: TRACE_VERSION,
-                },
-            )
-            .unwrap();
-            writeln!(&mut events).unwrap();
-            let mut buf = Vec::new();
-            for event in rx {
-                serde_json::to_writer(&mut buf, &event).unwrap();
-                writeln!(&mut buf).unwrap();
+        // let (tx, rx): (_, Receiver<TraceEvent>) =
+        //     std::sync::mpsc::sync_channel(CHANNEL_BUFFER_SIZE);
+        // let handle = std::thread::spawn(move || {
+        //     use std::io::Write;
+        //     let mut events = zstd::stream::Encoder::new(Vec::new(), COMPRESSION_LEVEL).unwrap();
+        //     serde_json::to_writer(
+        //         &mut events,
+        //         &TraceVersionData {
+        //             version: TRACE_VERSION,
+        //         },
+        //     )
+        //     .unwrap();
+        //     writeln!(&mut events).unwrap();
+        //     let mut buf = Vec::new();
+        //     for event in rx {
+        //         serde_json::to_writer(&mut buf, &event).unwrap();
+        //         writeln!(&mut buf).unwrap();
 
-                if buf.len() > COMPRESSION_CHUNK_SIZE {
-                    events.write_all(&std::mem::take(&mut buf)).unwrap();
-                }
-            }
+        //         if buf.len() > COMPRESSION_CHUNK_SIZE {
+        //             events.write_all(&std::mem::take(&mut buf)).unwrap();
+        //         }
+        //     }
 
-            events.write_all(buf.as_slice()).unwrap();
-            events.finish().unwrap()
-        });
+        //     events.write_all(buf.as_slice()).unwrap();
+        //     events.finish().unwrap()
+        // });
 
         Self {
             event_count: 0,
-            handle,
-            sender: tx,
+            // handle,
+            // sender: tx,
         }
     }
 
     pub fn push(&mut self, event: TraceEvent) {
-        self.sender.send(event).unwrap();
+        // self.sender.send(event).unwrap();
         self.event_count += 1;
     }
 
     pub fn finish(self) -> Vec<u8> {
         // close channel
-        drop(self.sender);
-        self.handle.join().unwrap()
+        // drop(self.sender);
+        // self.handle.join().unwrap()
+        vec![]
     }
 }
 
