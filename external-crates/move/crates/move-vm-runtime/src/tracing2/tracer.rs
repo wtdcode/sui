@@ -1596,7 +1596,7 @@ impl VMTracer<'_, '_> {
             B::VecSwap(_) => {
                 self.type_stack.pop()?;
                 self.type_stack.pop()?;
-                // let v_ref = self.type_stack.pop()?;
+                let v_ref = self.type_stack.pop()?;
                 // let location = v_ref.ref_type.as_ref()?.1.clone();
                 // let snap = self.resolve_location(&location, Some(frame), interpreter)?;
                 // let effects = self.register_post_effects(vec![EF::Write(Write {
@@ -1647,26 +1647,26 @@ impl VMTracer<'_, '_> {
             }
             i @ (B::UnpackVariant(_) | B::UnpackVariantGeneric(_)) => {
                 let ty = self.type_stack.pop()?;
-                // let resolver = frame.function.get_resolver(self.link_context(), loader);
-                // let (field_count, tag) = match i {
-                //     B::UnpackVariant(vidx) => resolver.variant_field_count_and_tag(*vidx),
-                //     B::UnpackVariantGeneric(vidx) => {
-                //         resolver.variant_instantiantiation_field_count_and_tag(*vidx)
-                //     }
-                //     _ => unreachable!(),
-                // };
-                // let MoveTypeLayout::Enum(e) = ty.layout else {
-                //     panic!("Expected enum, got {:#?}", ty.layout);
-                // };
-                // let variant_layout = e.variants.iter().find(|v| v.0.1 == tag)?;
+                let resolver = frame.function.get_resolver(self.link_context(), loader);
+                let (field_count, tag) = match i {
+                    B::UnpackVariant(vidx) => resolver.variant_field_count_and_tag(*vidx),
+                    B::UnpackVariantGeneric(vidx) => {
+                        resolver.variant_instantiantiation_field_count_and_tag(*vidx)
+                    }
+                    _ => unreachable!(),
+                };
+                let MoveTypeLayout::Enum(e) = ty.layout else {
+                    panic!("Expected enum, got {:#?}", ty.layout);
+                };
+                let variant_layout = e.variants.iter().find(|v| v.0.1 == tag)?;
                 // let mut effects = vec![];
-                // for f_layout in variant_layout.1.iter() {
-                //     let a_layout = RootedType {
-                //         layout: f_layout.layout.clone(),
-                //         ref_type: None,
-                //     };
-                //     self.type_stack.push(a_layout);
-                // }
+                for f_layout in variant_layout.1.iter() {
+                    let a_layout = RootedType {
+                        layout: f_layout.layout.clone(),
+                        ref_type: None,
+                    };
+                    self.type_stack.push(a_layout);
+                }
                 // for i in 0..field_count {
                 //     let value = self.resolve_stack_value(Some(frame), interpreter, i as usize)?;
                 //     effects.push(EF::Push(value));
@@ -1680,39 +1680,39 @@ impl VMTracer<'_, '_> {
             | B::UnpackVariantGenericImmRef(_)
             | B::UnpackVariantGenericMutRef(_)) => {
                 let ty = self.type_stack.pop()?;
-                // let resolver = frame.function.get_resolver(self.link_context(), loader);
-                // let ((field_count, tag), ref_type) = match i {
-                //     B::UnpackVariantImmRef(vidx) => {
-                //         (resolver.variant_field_count_and_tag(*vidx), RefType::Imm)
-                //     }
-                //     B::UnpackVariantMutRef(vidx) => {
-                //         (resolver.variant_field_count_and_tag(*vidx), RefType::Mut)
-                //     }
-                //     B::UnpackVariantGenericImmRef(vidx) => (
-                //         resolver.variant_instantiantiation_field_count_and_tag(*vidx),
-                //         RefType::Imm,
-                //     ),
-                //     B::UnpackVariantGenericMutRef(vidx) => (
-                //         resolver.variant_instantiantiation_field_count_and_tag(*vidx),
-                //         RefType::Mut,
-                //     ),
-                //     _ => unreachable!(),
-                // };
-                // let MoveTypeLayout::Enum(e) = ty.layout else {
-                //     panic!("Expected enum, got {:#?}", ty.layout);
-                // };
-                // let variant_layout = e.variants.iter().find(|v| v.0.1 == tag)?;
-                // let location = ty.ref_type.as_ref()?.1.clone();
+                let resolver = frame.function.get_resolver(self.link_context(), loader);
+                let ((field_count, tag), ref_type) = match i {
+                    B::UnpackVariantImmRef(vidx) => {
+                        (resolver.variant_field_count_and_tag(*vidx), RefType::Imm)
+                    }
+                    B::UnpackVariantMutRef(vidx) => {
+                        (resolver.variant_field_count_and_tag(*vidx), RefType::Mut)
+                    }
+                    B::UnpackVariantGenericImmRef(vidx) => (
+                        resolver.variant_instantiantiation_field_count_and_tag(*vidx),
+                        RefType::Imm,
+                    ),
+                    B::UnpackVariantGenericMutRef(vidx) => (
+                        resolver.variant_instantiantiation_field_count_and_tag(*vidx),
+                        RefType::Mut,
+                    ),
+                    _ => unreachable!(),
+                };
+                let MoveTypeLayout::Enum(e) = ty.layout else {
+                    panic!("Expected enum, got {:#?}", ty.layout);
+                };
+                let variant_layout = e.variants.iter().find(|v| v.0.1 == tag)?;
+                let location = ty.ref_type.as_ref()?.1.clone();
 
                 // let mut effects = vec![];
-                // for (i, f_layout) in variant_layout.1.iter().enumerate() {
-                //     let location = RuntimeLocation::Indexed(Box::new(location.clone()), i);
-                //     let a_layout = RootedType {
-                //         layout: f_layout.layout.clone(),
-                //         ref_type: Some((ref_type.clone(), location)),
-                //     };
-                //     self.type_stack.push(a_layout);
-                // }
+                for (i, f_layout) in variant_layout.1.iter().enumerate() {
+                    let location = RuntimeLocation::Indexed(Box::new(location.clone()), i);
+                    let a_layout = RootedType {
+                        layout: f_layout.layout.clone(),
+                        ref_type: Some((ref_type.clone(), location)),
+                    };
+                    self.type_stack.push(a_layout);
+                }
                 // for i in 0..field_count {
                 //     let value = self.resolve_stack_value(Some(frame), interpreter, i as usize)?;
                 //     effects.push(EF::Push(value));
