@@ -1723,9 +1723,9 @@ impl VMTracer<'_, '_> {
             }
             B::VariantSwitch(_) => {
                 self.type_stack.pop()?;
-                let effects = self.register_post_effects(vec![]);
-                self.trace
-                    .instruction(instruction, vec![], effects, remaining_gas, pc, &interpreter.operand_stack);
+                // let effects = self.register_post_effects(vec![]);
+                // self.trace
+                //     .instruction(instruction, vec![], effects, remaining_gas, pc, &interpreter.operand_stack);
             }
             B::ExistsDeprecated(_)
             | B::ExistsGenericDeprecated(_)
@@ -1739,6 +1739,7 @@ impl VMTracer<'_, '_> {
             | B::ImmBorrowGlobalGenericDeprecated(_) => unreachable!(),
         }
 
+        self.register_post_effects(vec![]);
         // At this point the type stack and the operand stack should be in sync.
         assert_eq!(self.type_stack.len(), interpreter.operand_stack.value.len());
         Some(())
