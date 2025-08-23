@@ -1118,7 +1118,7 @@ impl VMTracer<'_, '_> {
         let instruction = &frame.function.code()[pc as usize];
         match instruction {
             B::Pop | B::BrTrue(_) | B::BrFalse(_) => {
-                // self.type_stack.pop()?;
+                self.type_stack.pop()?;
                 // let effects = self.register_post_effects(vec![]);
                 // self.trace
                 //     .instruction(instruction, vec![], effects, remaining_gas, pc, &interpreter.operand_stack);
