@@ -274,7 +274,7 @@ impl BufferedEventStream {
         }
     }
 
-    pub fn push(&mut self, event: TraceEvent) {
+    pub fn push(&mut self, event: &TraceEvent) {
         // self.sender.send(event).unwrap();
         self.event_count += 1;
     }
@@ -295,7 +295,7 @@ impl MoveTrace {
         }
     }
 
-    pub fn push_event(&mut self, event: TraceEvent) {
+    pub fn push_event(&mut self, event: &TraceEvent) {
         self.buf.push(event);
     }
 
@@ -432,7 +432,7 @@ impl<'a> MoveTraceBuilder<'a> {
 
     /// Push an `Event` with `Stack` during runtime
     pub fn push_event_runtime(&mut self, event: TraceEvent, stack: Option<&Stack>) {
-        self.trace.push_event(event.clone());
+        self.trace.push_event(&event);
         self.tracer.notify(&event, Writer(&mut self.trace), stack);
     }
 }
