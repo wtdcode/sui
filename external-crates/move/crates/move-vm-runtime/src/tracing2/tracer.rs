@@ -912,13 +912,12 @@ impl VMTracer<'_, '_> {
         self.pc = Some(pc);
 
         let popn = |n: usize| {
-            // let mut effects = vec![];
-            // for i in 0..n {
-            //     let v = self.resolve_stack_value(Some(frame), interpreter, i)?;
-            //     effects.push(EF::Pop(v));
-            // }
-            // Some(effects)
-            Some(vec![])
+            let mut effects = vec![];
+            for i in 0..n {
+                let v = self.resolve_stack_value(Some(frame), interpreter, i)?;
+                effects.push(EF::Pop(v));
+            }
+            Some(effects)
         };
 
         assert_eq!(
@@ -1744,7 +1743,7 @@ impl VMTracer<'_, '_> {
         // At this point the type stack and the operand stack should be in sync.
         // assert_eq!(self.type_stack.len(), interpreter.operand_stack.value.len());
         if self.type_stack.len() != interpreter.operand_stack.value.len() {
-            tracing::warn!("type stack no in sync:\n{:?}\n{:?}\n{:?}", &self.type_stack, &interpreter.operand_stack.value, &instruction);
+            eprintln!("type stack no in sync:\n{:?}\n{:?}\n{:?}", &self.type_stack, &interpreter.operand_stack.value, &instruction);
         }
         Some(())
     }
