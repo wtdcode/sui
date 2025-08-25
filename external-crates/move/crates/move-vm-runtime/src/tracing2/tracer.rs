@@ -1160,6 +1160,7 @@ impl VMTracer<'_, '_> {
                 };
                 self.type_stack.push(a_layout);
 
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = vec![EF::Push(value)];
                 // let effects = self.register_post_effects(effects);
@@ -1199,6 +1200,7 @@ impl VMTracer<'_, '_> {
                 self.type_stack.pop()?;
                 self.type_stack.push(annot_layout);
 
+                interpreter.operand_stack.value.last()?; // we must do this or if CastUxx fails, operand stack is empty, we get assertion error below
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = vec![EF::Push(value.clone())];
                 // let effects = self.register_post_effects(effects);
@@ -1208,6 +1210,7 @@ impl VMTracer<'_, '_> {
             B::StLoc(lidx) => {
                 let ty = self.type_stack.pop()?;
                 self.insert_local(*lidx as usize, ty.clone())?;
+
                 // let v = self.resolve_local(frame, interpreter, *lidx as usize)?;
                 // let effects = self.register_post_effects(vec![EF::Write(Write {
                 //     location: Location::Local(self.current_frame_identifier()?, *lidx as usize),
@@ -1231,7 +1234,7 @@ impl VMTracer<'_, '_> {
                 // value type.
                 let a_ty = self.type_stack.pop()?;
                 self.type_stack.push(a_ty);
-
+                interpreter.operand_stack.value.last()?;
                 // let result = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(result)]);
                 // self.trace
@@ -1245,7 +1248,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
-
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // self.trace
@@ -1269,7 +1272,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
-
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // self.trace
@@ -1289,7 +1292,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
-
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // let TypeTag::Struct(s_type) = loader.type_to_type_tag(&struct_type).ok()? else {
@@ -1311,6 +1314,9 @@ impl VMTracer<'_, '_> {
                     });
                 }
 
+                if s.fields.len() >= interpreter.operand_stack.value.len() {
+                    return None;
+                }
                 // let mut effects = vec![];
                 // for i in (0..s.fields.len()).rev() {
                 //     let value = self.resolve_stack_value(Some(frame), interpreter, i)?;
@@ -1329,6 +1335,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // self.trace
@@ -1342,6 +1349,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // self.trace
@@ -1350,6 +1358,7 @@ impl VMTracer<'_, '_> {
             B::Not => {
                 let a_ty = self.type_stack.pop()?;
                 self.type_stack.push(a_ty);
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // self.trace
@@ -1372,7 +1381,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
-
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // self.trace
@@ -1393,7 +1402,7 @@ impl VMTracer<'_, '_> {
                     )),
                 };
                 self.type_stack.push(a_layout);
-
+                interpreter.operand_stack.value.last()?;
                 // let val = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(val)]);
                 // self.trace
@@ -1417,6 +1426,7 @@ impl VMTracer<'_, '_> {
                 let mut reference_ty = self.type_stack.pop()?;
                 reference_ty.ref_type.as_mut()?.0 = RefType::Imm;
                 self.type_stack.push(reference_ty);
+                interpreter.operand_stack.value.last()?;
                 // let reference_val = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(reference_val)]);
                 // self.trace
@@ -1446,6 +1456,7 @@ impl VMTracer<'_, '_> {
                     ref_type: Some((ref_type, field_location)),
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // self.trace
@@ -1474,6 +1485,7 @@ impl VMTracer<'_, '_> {
                     ref_type: Some((ref_type, field_location)),
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(value)]);
                 // let ty_args = slayout.type_.type_params.clone();
@@ -1495,6 +1507,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let val = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(val)]);
                 // self.trace
@@ -1524,6 +1537,7 @@ impl VMTracer<'_, '_> {
                     ref_type: Some((ref_type, location)),
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let val = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(val)]);
                 // self.trace
@@ -1536,6 +1550,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let len = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(len)]);
                 // self.trace
@@ -1567,6 +1582,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let v = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(v)]);
                 // self.trace
@@ -1583,6 +1599,10 @@ impl VMTracer<'_, '_> {
                         ref_type: None,
                     };
                     self.type_stack.push(a_layout);
+                }
+
+                if *n as usize >= interpreter.operand_stack.value.len() {
+                    return None;
                 }
                 // let mut effects = vec![];
                 // for i in (0..*n).rev() {
@@ -1619,6 +1639,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let val = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(val)]);
                 // self.trace
@@ -1640,6 +1661,7 @@ impl VMTracer<'_, '_> {
                     ref_type: None,
                 };
                 self.type_stack.push(a_layout);
+                interpreter.operand_stack.value.last()?;
                 // let val = self.resolve_stack_value(Some(frame), interpreter, 0)?;
                 // let effects = self.register_post_effects(vec![EF::Push(val)]);
                 // self.trace
@@ -1666,6 +1688,9 @@ impl VMTracer<'_, '_> {
                         ref_type: None,
                     };
                     self.type_stack.push(a_layout);
+                }
+                if field_count as usize >= interpreter.operand_stack.value.len() {
+                    return None;
                 }
                 // for i in 0..field_count {
                 //     let value = self.resolve_stack_value(Some(frame), interpreter, i as usize)?;
@@ -1712,6 +1737,9 @@ impl VMTracer<'_, '_> {
                         ref_type: Some((ref_type.clone(), location)),
                     };
                     self.type_stack.push(a_layout);
+                }
+                if field_count as usize >= interpreter.operand_stack.value.len() {
+                    return None;
                 }
                 // for i in 0..field_count {
                 //     let value = self.resolve_stack_value(Some(frame), interpreter, i as usize)?;
