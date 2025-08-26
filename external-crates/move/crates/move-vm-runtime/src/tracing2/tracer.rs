@@ -1772,6 +1772,7 @@ impl VMTracer<'_, '_> {
         // assert_eq!(self.type_stack.len(), interpreter.operand_stack.value.len());
         if self.type_stack.len() != interpreter.operand_stack.value.len() {
             eprintln!("type stack no in sync:\n{:?}\n{:?}\n{:?}", &self.type_stack, &interpreter.operand_stack.value, &instruction);
+            return None;
         }
         Some(())
     }
