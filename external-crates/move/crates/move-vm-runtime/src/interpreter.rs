@@ -1412,15 +1412,15 @@ impl Frame {
                     instruction,
                 );
 
-                close_instruction!(
-                    tracer,
-                    instruction,
-                    self,
-                    interpreter,
-                    resolver.loader(),
-                    gas_meter,
-                    r.as_ref().err()
-                );
+                // close_instruction!(
+                //     tracer,
+                //     instruction,
+                //     self,
+                //     interpreter,
+                //     resolver.loader(),
+                //     gas_meter,
+                //     r.as_ref().err()
+                // );
 
                 match r? {
                     InstrRet::Ok => (),

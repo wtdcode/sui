@@ -779,48 +779,48 @@ impl VMTracer<'_, '_> {
         self.link_context = Some(link_context);
         let new_frame_idx = self.trace.current_trace_offset();
 
-        let call_args = (0..function.arg_count())
-            .rev()
-            .enumerate()
-            .map(|(local_idx, stack_idx)| {
-                let val = self.resolve_stack_value(Some(calling_frame), interpreter, stack_idx);
-                // NB: it is important for us to resolve the value _before_ we register that any
-                // global is stored there.
-                self.store_global(interpreter, new_frame_idx, stack_idx, local_idx)?;
-                val
-            })
-            .collect::<Option<Vec<_>>>()?;
+        // let call_args = (0..function.arg_count())
+        //     .rev()
+        //     .enumerate()
+        //     .map(|(local_idx, stack_idx)| {
+        //         let val = self.resolve_stack_value(Some(calling_frame), interpreter, stack_idx);
+        //         // NB: it is important for us to resolve the value _before_ we register that any
+        //         // global is stored there.
+        //         self.store_global(interpreter, new_frame_idx, stack_idx, local_idx)?;
+        //         val
+        //     })
+        //     .collect::<Option<Vec<_>>>()?;
 
-        let call_args_types = self
-            .type_stack
-            .split_off(self.type_stack.len() - function.arg_count());
-        let function_type_info = FunctionTypeInfo::new(function, loader, ty_args, link_context)?;
+        // let call_args_types = self
+        //     .type_stack
+        //     .split_off(self.type_stack.len() - function.arg_count());
+        // let function_type_info = FunctionTypeInfo::new(function, loader, ty_args, link_context)?;
 
-        let locals_types = function_type_info
-            .local_types
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(i, tag_with_layout_info_opt)| {
-                // For any arguments, start them out with the correct locations
-                if let Some(a_layout) = call_args_types.get(i).cloned() {
-                    let ref_type = match a_layout.ref_type {
-                        Some((ref_type, location)) => ReferenceType::Filled { ref_type, location },
-                        None => ReferenceType::Value,
-                    };
-                    LocalType {
-                        layout: Some(a_layout.layout),
-                        ref_type,
-                    }
-                } else {
-                    let (layout, ref_type) = tag_with_layout_info_opt.layout;
-                    let ref_type = ref_type
-                        .map(|ref_type| ReferenceType::Empty { ref_type })
-                        .unwrap_or(ReferenceType::Value);
-                    LocalType { layout, ref_type }
-                }
-            })
-            .collect();
+        // let locals_types = function_type_info
+        //     .local_types
+        //     .iter()
+        //     .cloned()
+        //     .enumerate()
+        //     .map(|(i, tag_with_layout_info_opt)| {
+        //         // For any arguments, start them out with the correct locations
+        //         if let Some(a_layout) = call_args_types.get(i).cloned() {
+        //             let ref_type = match a_layout.ref_type {
+        //                 Some((ref_type, location)) => ReferenceType::Filled { ref_type, location },
+        //                 None => ReferenceType::Value,
+        //             };
+        //             LocalType {
+        //                 layout: Some(a_layout.layout),
+        //                 ref_type,
+        //             }
+        //         } else {
+        //             let (layout, ref_type) = tag_with_layout_info_opt.layout;
+        //             let ref_type = ref_type
+        //                 .map(|ref_type| ReferenceType::Empty { ref_type })
+        //                 .unwrap_or(ReferenceType::Value);
+        //             LocalType { layout, ref_type }
+        //         }
+        //     })
+        //     .collect();
 
         debug_assert!(new_frame_idx == self.trace.current_trace_offset());
 
@@ -829,8 +829,8 @@ impl VMTracer<'_, '_> {
             FrameInfo {
                 frame_identifier: new_frame_idx,
                 is_native: function.is_native(),
-                locals_types,
-                return_types: function_type_info.return_types.clone(),
+                locals_types: vec![],
+                return_types: vec![],
             },
         );
         let version_id = get_version_id(link_context, function.module_id(), loader);
@@ -841,18 +841,10 @@ impl VMTracer<'_, '_> {
             function.name().to_string(),
             function.module_id().clone(),
             version_id,
-            call_args,
-            function_type_info.ty_args,
-            function_type_info
-                .return_types
-                .iter()
-                .map(|tag_with_layout_info_opt| tag_with_layout_info_opt.as_tag_with_refs())
-                .collect(),
-            function_type_info
-                .local_types
-                .into_iter()
-                .map(|tag_with_layout_info_opt| tag_with_layout_info_opt.as_tag_with_refs())
-                .collect(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
             function.is_native(),
             remaining_gas,
             &interpreter.operand_stack
@@ -1847,8 +1839,17 @@ impl<'a, 'b> VMTracer<'a, 'b> {
         loader: &Loader,
         remaining_gas: u64,
     ) {
-        let opt = self.open_instruction_(frame, interpreter, loader, remaining_gas);
-        self.emit_trace_error_if_err(opt.is_none(), interpreter);
+        // let opt = self.open_instruction_(frame, interpreter, loader, remaining_gas);
+        // self.emit_trace_error_if_err(opt.is_none(), interpreter);
+        let pc = frame.pc;
+        self.pc = Some(pc);
+        let instruction = &frame.function.code()[pc as usize];
+        self.trace.before_instruction(
+                instruction,
+                vec![], 
+                remaining_gas, pc,
+            &interpreter.operand_stack
+        );
     }
 
     pub(crate) fn close_instruction(
