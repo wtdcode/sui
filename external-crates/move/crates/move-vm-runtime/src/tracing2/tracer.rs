@@ -7,7 +7,7 @@ use crate::{
 };
 use move_binary_format::{
     errors::{PartialVMError, VMError, VMResult},
-    file_format::{ConstantPoolIndex, SignatureIndex},
+    file_format::{ConstantPoolIndex, SignatureIndex, SignatureToken},
 };
 use move_core_types::{
     account_address::AccountAddress,
@@ -636,7 +636,11 @@ impl VMTracer<'_, '_> {
     ) -> Option<()> {
         self.link_context = Some(link_context);
 
-        // let function_type_info = FunctionTypeInfo::new(function, loader, ty_args, link_context)?;
+        let (module, _) = loader.get_module(link_context, function.module_id());
+        let fdef = module.function_def_at(function.index());
+        let f_handle = module.function_handle_at(fdef.function);
+        let input_unresolved_tys = module.signature_at(f_handle.parameters).0.clone();
+        let return_unresolved_tys = module.signature_at(f_handle.return_).0.clone();
 
         // assert!(function_type_info.local_types.len() == function.local_count());
 
@@ -709,6 +713,8 @@ impl VMTracer<'_, '_> {
             vec![],
             vec![],
             vec![],
+            input_unresolved_tys,
+            return_unresolved_tys,
             function.is_native(),
             remaining_gas,
             &interpreter.operand_stack
@@ -824,6 +830,12 @@ impl VMTracer<'_, '_> {
         );
         let version_id = get_version_id(link_context, function.module_id(), loader);
 
+        let (module, _) = loader.get_module(link_context, function.module_id());
+        let fdef = module.function_def_at(function.index());
+        let f_handle = module.function_handle_at(fdef.function);
+        let input_unresolved_tys = module.signature_at(f_handle.parameters).0.clone();
+        let return_unresolved_tys = module.signature_at(f_handle.return_).0.clone();
+
         self.trace.open_frame(
             self.current_frame_identifier()?,
             function.index(),
@@ -834,6 +846,8 @@ impl VMTracer<'_, '_> {
             vec![],
             vec![],
             vec![],
+            input_unresolved_tys,
+            return_unresolved_tys,
             function.is_native(),
             remaining_gas,
             &interpreter.operand_stack

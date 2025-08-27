@@ -5,6 +5,7 @@
 
 use crate::interface::{NopTracer, Tracer, Writer};
 use crate::value::SerializableMoveValue;
+use move_binary_format::file_format::SignatureToken;
 use move_binary_format::{
     file_format::{Bytecode, FunctionDefinitionIndex as BinaryFunctionDefinitionIndex},
     file_format_common::instruction_opcode,
@@ -125,6 +126,8 @@ pub struct Frame {
     pub parameters: Vec<TraceValue>,
     pub return_types: Vec<TypeTagWithRefs>,
     pub locals_types: Vec<TypeTagWithRefs>,
+    pub input_unresolved_tys: Vec<SignatureToken>,
+    pub return_unresolved_tys: Vec<SignatureToken>,
     pub is_native: bool,
 }
 
@@ -349,6 +352,8 @@ impl<'a> MoveTraceBuilder<'a> {
         type_instantiation: Vec<TypeTag>,
         return_types: Vec<TypeTagWithRefs>,
         locals_types: Vec<TypeTagWithRefs>,
+        input_unresolved_tys: Vec<SignatureToken>,
+        return_unresolved_tys: Vec<SignatureToken>,
         is_native: bool,
         gas_left: u64,
         stack: &Stack
@@ -363,6 +368,8 @@ impl<'a> MoveTraceBuilder<'a> {
             parameters,
             return_types,
             locals_types,
+            input_unresolved_tys,
+            return_unresolved_tys,
             is_native,
         });
         self.push_event_runtime(TraceEvent::OpenFrame { frame, gas_left }, Some(stack));
