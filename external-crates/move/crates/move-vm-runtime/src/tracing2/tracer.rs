@@ -16,8 +16,7 @@ use move_core_types::{
 };
 use move_trace_format::{
     format::{
-        DataLoad, Effect as EF, Location, MoveTraceBuilder, Read, RefType, TraceIndex, TraceValue,
-        TypeTagWithRefs, Write,
+        DataLoad, Effect as EF, ExtraInstructionInformation, Location, MoveTraceBuilder, Read, RefType, TraceIndex, TraceValue, TypeTagWithRefs, Write
     },
     value::SerializableMoveValue,
 };
@@ -906,24 +905,24 @@ impl VMTracer<'_, '_> {
         let pc = frame.pc;
         self.pc = Some(pc);
 
-        let popn = |n: usize| {
-            let mut effects = vec![];
-            for i in 0..n {
-                let v = self.resolve_stack_value(Some(frame), interpreter, i)?;
-                effects.push(EF::Pop(v));
-            }
-            Some(effects)
-        };
+        // let popn = |n: usize| {
+        //     let mut effects = vec![];
+        //     for i in 0..n {
+        //         let v = self.resolve_stack_value(Some(frame), interpreter, i)?;
+        //         effects.push(EF::Pop(v));
+        //     }
+        //     Some(effects)
+        // };
 
-        assert_eq!(
-            self.type_stack.len(),
-            interpreter.operand_stack.value.len(),
-            "Type stack and operand stack must be the same length {} {}",
-            frame.function.name(),
-            pc,
-        );
+        // assert_eq!(
+        //     self.type_stack.len(),
+        //     interpreter.operand_stack.value.len(),
+        //     "Type stack and operand stack must be the same length {} {}",
+        //     frame.function.name(),
+        //     pc,
+        // );
 
-        let mut type_parameters = vec![];
+        let mut extra = None;
         let instruction = &frame.function.code()[pc as usize];
         match instruction {
             B::Nop
@@ -942,19 +941,45 @@ impl VMTracer<'_, '_> {
             }
             B::MutBorrowFieldGeneric(_)
             | B::ImmBorrowFieldGeneric(_) => {
-                let value_ty = self.type_stack.last()?;
-                let MoveTypeLayout::Struct(slayout) = &value_ty.layout else {
-                    panic!("Expected struct, got {:?}", value_ty.layout)
-                };
-                type_parameters = slayout.type_.type_params.clone()
+                // let value_ty = self.type_stack.last()?;
+                // let MoveTypeLayout::Struct(slayout) = &value_ty.layout else {
+                //     panic!("Expected struct, got {:?}", value_ty.layout)
+                // };
+                // type_parameters = slayout.type_.type_params.clone()
+            }
+            B::Unpack(sidx) => {
+                let resolver = frame.function.get_resolver(self.link_context(), loader);
+                let field_count = resolver.field_count(*sidx) as usize;
+                extra = Some(ExtraInstructionInformation::Unpack(field_count));
+            }
+            B::UnpackVariant(vidx) => {
+                let resolver = frame.function.get_resolver(self.link_context(), loader);
+                let (field_count, _variant_tag) = resolver.variant_field_count_and_tag(*vidx);
+                extra = Some(ExtraInstructionInformation::UnpackVariant(field_count as _));
+            }
+            B::UnpackGeneric(sidx) => {
+                let resolver = frame.function.get_resolver(self.link_context(), loader);
+                let field_count = resolver.field_instantiation_count(*sidx) as usize;
+                // let struct_type = resolver
+                //     .instantiate_struct_type(*sidx, &frame.ty_args)
+                //     .ok()?;
+                // let TypeTag::Struct(s_type) = loader.type_to_type_tag(&struct_type).ok()? else {
+                //     panic!("Expected struct, got {:#?}", struct_type);
+                // };
+                // type_parameters = s_type.type_params.clone();
+                extra = Some(ExtraInstructionInformation::UnpackGeneric(field_count));
+            }
+            B::UnpackVariantGeneric(vidx) => {
+                let resolver = frame.function.get_resolver(self.link_context(), loader);
+                let (field_count, _variant_tag) =
+                    resolver.variant_instantiantiation_field_count_and_tag(*vidx);
+                extra = Some(ExtraInstructionInformation::UnpackVariantGeneric(field_count as _));
             }
             B::MutBorrowField(_)
             | B::ImmBorrowField(_)
             | B::FreezeRef
             | B::Not
             | B::Abort
-            | B::Unpack(_)
-            | B::UnpackGeneric(_)
             | B::CastU8
             | B::CastU16
             | B::CastU32
@@ -971,10 +996,8 @@ impl VMTracer<'_, '_> {
             | B::UnpackVariantImmRef(_)
             | B::UnpackVariantMutRef(_)
             | B::UnpackVariantGenericImmRef(_)
-            | B::UnpackVariantGenericMutRef(_)
-            | B::UnpackVariant(_)
-            | B::UnpackVariantGeneric(_) => {
-                self.register_pre_effects(popn(1)?);
+            | B::UnpackVariantGenericMutRef(_) => {
+                // self.register_pre_effects(popn(1)?);
             }
             B::Add
             | B::Sub
@@ -997,83 +1020,93 @@ impl VMTracer<'_, '_> {
             | B::WriteRef
             | B::VecImmBorrow(_)
             | B::VecMutBorrow(_)
-            | B::VecPushBack(_) => self.register_pre_effects(popn(2)?),
-            B::VecSwap(_) => self.register_pre_effects(popn(3)?),
-            B::VecPack(_, n) => self.register_pre_effects(popn(*n as usize)?),
+            | B::VecPushBack(_) => {
+                // self.register_pre_effects(popn(2)?),
+            }
+            B::VecSwap(_) => {
+                // self.register_pre_effects(popn(3)?),
+            }
+            B::VecPack(_, n) => {
+                // self.register_pre_effects(popn(*n as usize)?),
+            }
             i @ (B::MoveLoc(l) | B::CopyLoc(l)) => {
-                let v = self.resolve_local(frame, interpreter, *l as usize)?;
-                let effects = vec![EF::Read(Read {
-                    location: Location::Local(self.current_frame_identifier()?, *l as usize),
-                    root_value_read: v.clone(),
-                    moved: matches!(i, B::MoveLoc(_)),
-                })];
-                self.register_pre_effects(effects);
+                // let v = self.resolve_local(frame, interpreter, *l as usize)?;
+                // let effects = vec![EF::Read(Read {
+                //     location: Location::Local(self.current_frame_identifier()?, *l as usize),
+                //     root_value_read: v.clone(),
+                //     moved: matches!(i, B::MoveLoc(_)),
+                // })];
+                // self.register_pre_effects(effects);
             }
             B::StLoc(lidx) => {
-                let ty = self.type_stack.last()?.clone();
-                let v = self.resolve_stack_value(Some(frame), interpreter, 0)?;
-                self.store_global(
-                    interpreter,
-                    self.current_frame_identifier()?,
-                    0,
-                    *lidx as usize,
-                )?;
-                self.insert_local(*lidx as usize, ty)?;
-                let effects = vec![EF::Pop(v.clone())];
-                self.register_pre_effects(effects);
+                // let ty = self.type_stack.last()?.clone();
+                // let v = self.resolve_stack_value(Some(frame), interpreter, 0)?;
+                // self.store_global(
+                //     interpreter,
+                //     self.current_frame_identifier()?,
+                //     0,
+                //     *lidx as usize,
+                // )?;
+                // self.insert_local(*lidx as usize, ty)?;
+                // let effects = vec![EF::Pop(v.clone())];
+                // self.register_pre_effects(effects);
             }
             B::ImmBorrowLoc(l_idx) | B::MutBorrowLoc(l_idx) => {
-                let val = self.resolve_local(frame, interpreter, *l_idx as usize)?;
-                let location = Location::Local(self.current_frame_identifier()?, *l_idx as usize);
-                self.register_pre_effects(vec![EF::Read(Read {
-                    location,
-                    root_value_read: val,
-                    moved: false,
-                })]);
+                // let val = self.resolve_local(frame, interpreter, *l_idx as usize)?;
+                // let location = Location::Local(self.current_frame_identifier()?, *l_idx as usize);
+                // self.register_pre_effects(vec![EF::Read(Read {
+                //     location,
+                //     root_value_read: val,
+                //     moved: false,
+                // })]);
             }
             // Handled by open frame
             B::Call(_) | B::CallGeneric(_) => {}
             B::Pack(sidx) => {
                 let resolver = frame.function.get_resolver(self.link_context(), loader);
                 let field_count = resolver.field_count(*sidx) as usize;
-                self.register_pre_effects(popn(field_count)?);
+                extra = Some(ExtraInstructionInformation::Pack(field_count));
+                // self.register_pre_effects(popn(field_count)?);
             }
             B::PackGeneric(sidx) => {
                 let resolver = frame.function.get_resolver(self.link_context(), loader);
                 let field_count = resolver.field_instantiation_count(*sidx) as usize;
-                let struct_type = resolver
-                    .instantiate_struct_type(*sidx, &frame.ty_args)
-                    .ok()?;
-                let TypeTag::Struct(s_type) = loader.type_to_type_tag(&struct_type).ok()? else {
-                    panic!("Expected struct, got {:#?}", struct_type);
-                };
-                type_parameters = s_type.type_params.clone();
-                self.register_pre_effects(popn(field_count)?);
+                // let struct_type = resolver
+                //     .instantiate_struct_type(*sidx, &frame.ty_args)
+                //     .ok()?;
+                // let TypeTag::Struct(s_type) = loader.type_to_type_tag(&struct_type).ok()? else {
+                //     panic!("Expected struct, got {:#?}", struct_type);
+                // };
+                // type_parameters = s_type.type_params.clone();
+                extra = Some(ExtraInstructionInformation::PackGeneric(field_count));
+                // self.register_pre_effects(popn(field_count)?);
             }
             B::PackVariant(vidx) => {
                 let resolver = frame.function.get_resolver(self.link_context(), loader);
                 let (field_count, _variant_tag) = resolver.variant_field_count_and_tag(*vidx);
-                self.register_pre_effects(popn(field_count as usize)?);
+                extra = Some(ExtraInstructionInformation::PackVariant(field_count as _));
+                // self.register_pre_effects(popn(field_count as usize)?);
             }
             B::PackVariantGeneric(vidx) => {
                 let resolver = frame.function.get_resolver(self.link_context(), loader);
                 let (field_count, _variant_tag) =
                     resolver.variant_instantiantiation_field_count_and_tag(*vidx);
-                self.register_pre_effects(popn(field_count as usize)?);
+                extra = Some(ExtraInstructionInformation::PackVariantGeneric(field_count as _));
+                // self.register_pre_effects(popn(field_count as usize)?);
             }
             B::ReadRef => {
-                let ref_value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
-                let location = ref_value.location()?.clone();
-                let runtime_location = RuntimeLocation::as_runtime_location(location.clone());
-                let value = self.resolve_location(&runtime_location, Some(frame), interpreter)?;
-                self.register_pre_effects(vec![
-                    EF::Pop(ref_value),
-                    EF::Read(Read {
-                        location,
-                        root_value_read: value.clone(),
-                        moved: false,
-                    }),
-                ]);
+                // let ref_value = self.resolve_stack_value(Some(frame), interpreter, 0)?;
+                // let location = ref_value.location()?.clone();
+                // let runtime_location = RuntimeLocation::as_runtime_location(location.clone());
+                // let value = self.resolve_location(&runtime_location, Some(frame), interpreter)?;
+                // self.register_pre_effects(vec![
+                //     EF::Pop(ref_value),
+                //     EF::Read(Read {
+                //         location,
+                //         root_value_read: value.clone(),
+                //         moved: false,
+                //     }),
+                // ]);
             }
 
             B::ExistsDeprecated(_)
@@ -1087,7 +1120,7 @@ impl VMTracer<'_, '_> {
             | B::ImmBorrowGlobalDeprecated(_)
             | B::ImmBorrowGlobalGenericDeprecated(_) => unreachable!(),
         }
-        self.trace.before_instruction(instruction, type_parameters, remaining_gas, pc, &interpreter.operand_stack);
+        self.trace.before_instruction(instruction, vec![], remaining_gas, pc, &interpreter.operand_stack, extra);
         Some(())
     }
 
@@ -1840,19 +1873,10 @@ impl<'a, 'b> VMTracer<'a, 'b> {
         frame: &Frame,
         interpreter: &Interpreter,
         loader: &Loader,
-        remaining_gas: u64,
+        remaining_gas: u64
     ) {
-        // let opt = self.open_instruction_(frame, interpreter, loader, remaining_gas);
-        // self.emit_trace_error_if_err(opt.is_none(), interpreter);
-        let pc = frame.pc;
-        self.pc = Some(pc);
-        let instruction = &frame.function.code()[pc as usize];
-        self.trace.before_instruction(
-                instruction,
-                vec![], 
-                remaining_gas, pc,
-            &interpreter.operand_stack
-        );
+        let opt = self.open_instruction_(frame, interpreter, loader, remaining_gas);
+        self.emit_trace_error_if_err(opt.is_none(), interpreter);
     }
 
     pub(crate) fn close_instruction(

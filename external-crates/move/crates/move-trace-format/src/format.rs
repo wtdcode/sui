@@ -162,6 +162,18 @@ pub struct DataLoad {
     pub snapshot: SerializableMoveValue,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ExtraInstructionInformation {
+    Pack(usize),
+    PackGeneric(usize),
+    PackVariant(usize),
+    PackVariantGeneric(usize),
+    Unpack(usize),
+    UnpackVariant(usize),
+    UnpackGeneric(usize),
+    UnpackVariantGeneric(usize)
+}
+
 /// A TraceEvent is a single event in the Move VM, external events can also be interleaved in the
 /// trace. MoveVM events, are well structured, and can be a frame event or an instruction event.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -186,6 +198,7 @@ pub enum TraceEvent {
         pc: u16,
         gas_left: u64,
         instruction: Bytecode,
+        extra: Option<ExtraInstructionInformation>
     },
     Effect(Box<Effect>),
     External(Box<serde_json::Value>),
@@ -414,13 +427,15 @@ impl<'a> MoveTraceBuilder<'a> {
         type_parameters: Vec<TypeTag>,
         gas_left: u64,
         pc: u16,
-        stack: &Stack
+        stack: &Stack,
+        extra: Option<ExtraInstructionInformation>
     ) {
         self.push_event_runtime(TraceEvent::BeforeInstruction {
             type_parameters,
             pc,
             gas_left,
             instruction: instruction.clone(),
+            extra
         },
             Some(stack)
         );
