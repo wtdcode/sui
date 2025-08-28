@@ -60,21 +60,21 @@ pub fn trace_transfer(
     obj_values: &[ObjectValue],
 ) -> Result<(), ExecutionError> {
     if let Some(trace_builder) = trace_builder_opt {
-        let mut to_transfer = vec![];
-        for (idx, v) in obj_values.iter().enumerate() {
-            let obj_info = move_value_info_from_obj_value(context, v)?;
-            to_transfer.push(ExtMoveValue::Single {
-                name: format!("obj{idx}"),
-                info: obj_info,
-            });
-        }
-        trace_builder.push_event(TraceEvent::External(Box::new(serde_json::json!(
-            PTBEvent::ExternalEvent(ExternalEvent {
-                description: "TransferObjects: obj0...objN => ()".to_string(),
-                name: "Transfer".to_string(),
-                values: to_transfer,
-            })
-        ))));
+        // let mut to_transfer = vec![];
+        // for (idx, v) in obj_values.iter().enumerate() {
+        //     let obj_info = move_value_info_from_obj_value(context, v)?;
+        //     to_transfer.push(ExtMoveValue::Single {
+        //         name: format!("obj{idx}"),
+        //         info: obj_info,
+        //     });
+        // }
+        // trace_builder.push_event(TraceEvent::External(Box::new(serde_json::json!(
+        //     PTBEvent::ExternalEvent(ExternalEvent {
+        //         description: "TransferObjects: obj0...objN => ()".to_string(),
+        //         name: "Transfer".to_string(),
+        //         values: to_transfer,
+        //     })
+        // ))));
     }
     Ok(())
 }
