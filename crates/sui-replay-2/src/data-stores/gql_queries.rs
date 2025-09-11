@@ -27,13 +27,13 @@ pub mod epoch_query {
     use chrono::{DateTime as ChronoDateTime, Utc};
 
     #[derive(cynic::QueryVariables)]
-    pub(crate) struct EpochDataArgs {
+    pub struct EpochDataArgs {
         pub epoch: Option<u64>,
     }
 
     #[derive(cynic::QueryFragment)]
     #[cynic(variables = "EpochDataArgs")]
-    pub(crate) struct Query {
+    pub struct Query {
         #[arguments(epochId: $epoch)]
         pub epoch: Option<Epoch>,
     }
@@ -55,7 +55,7 @@ pub mod epoch_query {
         pub protocol_version: u64,
     }
 
-    pub(crate) async fn query(
+    pub async fn query(
         epoch_id: u64,
         data_store: &DataStore,
     ) -> Result<Option<EpochData>, anyhow::Error> {
@@ -96,23 +96,23 @@ pub mod epoch_query {
     }
 }
 
-pub(crate) mod txn_query {
+pub mod txn_query {
     use super::*;
     use anyhow::Context;
     use sui_types::transaction::TransactionData;
 
     #[derive(cynic::Scalar, Debug, Clone)]
     #[cynic(graphql_type = "Base64")]
-    pub(crate) struct Base64(pub String);
+    pub struct Base64(pub String);
 
     #[derive(cynic::QueryVariables)]
-    pub(crate) struct TransactionDataArgs {
+    pub struct TransactionDataArgs {
         pub digest: String,
     }
 
     #[derive(cynic::QueryFragment)]
     #[cynic(variables = "TransactionDataArgs")]
-    pub(crate) struct Query {
+    pub struct Query {
         #[arguments(digest: $digest)]
         pub transaction: Option<Transaction>,
     }
@@ -134,7 +134,7 @@ pub(crate) mod txn_query {
         pub sequence_number: u64,
     }
 
-    pub(crate) async fn query(
+    pub async fn query(
         digest: String,
         data_store: &DataStore,
     ) -> Result<Option<(TransactionData, sui_types::effects::TransactionEffects, u64)>, anyhow::Error>
@@ -212,15 +212,15 @@ pub mod object_query {
 
     #[derive(cynic::Scalar, Debug, Clone)]
     #[cynic(graphql_type = "SuiAddress")]
-    pub(crate) struct SuiAddress(pub String);
+    pub struct SuiAddress(pub String);
 
     #[derive(cynic::Scalar, Debug, Clone)]
     #[cynic(graphql_type = "Base64")]
-    pub(crate) struct Base64(pub String);
+    pub struct Base64(pub String);
 
     #[derive(cynic::InputObject, Debug)]
     #[cynic(graphql_type = "ObjectKey")]
-    pub(crate) struct ObjectKey {
+    pub struct ObjectKey {
         pub address: SuiAddress,
         pub version: Option<u64>,
         pub root_version: Option<u64>,
@@ -228,13 +228,13 @@ pub mod object_query {
     }
 
     #[derive(cynic::QueryVariables)]
-    pub(crate) struct MultiGetObjectsVars {
+    pub struct MultiGetObjectsVars {
         pub keys: Vec<ObjectKey>,
     }
 
     #[derive(cynic::QueryFragment)]
     #[cynic(variables = "MultiGetObjectsVars", graphql_type = "Query")]
-    pub(crate) struct MultiGetObjectsQuery {
+    pub struct MultiGetObjectsQuery {
         #[arguments(keys: $keys)]
         pub multi_get_objects: Vec<Option<ObjectFragment>>,
     }
@@ -244,7 +244,7 @@ pub mod object_query {
         graphql_type = "Object",
         schema_module = "crate::data_stores::gql_queries::schema"
     )]
-    pub(crate) struct ObjectFragment {
+    pub struct ObjectFragment {
         #[allow(dead_code)]
         pub address: SuiAddress,
         pub version: u64,
@@ -256,7 +256,7 @@ pub mod object_query {
     // we are picking a "random" and conservative number.
     const MAX_KEYS_SIZE: usize = 30;
 
-    pub(crate) async fn query(
+    pub async fn query(
         keys: &[replay_interface::ObjectKey],
         data_store: &DataStore,
     ) -> Result<Vec<Option<(Object, u64)>>, anyhow::Error> {
@@ -333,11 +333,11 @@ pub mod chain_id_query {
     use super::*;
 
     #[derive(cynic::QueryFragment)]
-    pub(crate) struct Query {
+    pub struct Query {
         chain_identifier: Option<String>,
     }
 
-    pub(crate) async fn query(data_store: &DataStore) -> Result<String, anyhow::Error> {
+    pub async fn query(data_store: &DataStore) -> Result<String, anyhow::Error> {
         let query = Query::build(());
         let response = data_store.run_query(&query).await?;
         let Some(chain_id) = response.data.and_then(|data| data.chain_identifier) else {
