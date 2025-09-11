@@ -21,7 +21,7 @@ pub mod schema {
     cynic::impl_scalar!(ChronoDateTime<Utc>, DateTime);
 }
 
-pub(crate) mod epoch_query {
+pub mod epoch_query {
     use super::*;
     use anyhow::anyhow;
     use chrono::{DateTime as ChronoDateTime, Utc};
@@ -204,7 +204,7 @@ pub(crate) mod txn_query {
     }
 }
 
-pub(crate) mod object_query {
+pub mod object_query {
     use sui_types::object::Object;
 
     use super::*;
@@ -329,7 +329,7 @@ pub(crate) mod object_query {
     }
 }
 
-pub(crate) mod chain_id_query {
+pub mod chain_id_query {
     use super::*;
 
     #[derive(cynic::QueryFragment)]
