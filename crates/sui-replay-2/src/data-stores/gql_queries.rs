@@ -44,15 +44,15 @@ pub(crate) mod epoch_query {
 
     #[derive(cynic::QueryFragment)]
     pub struct Epoch {
-        epoch_id: u64,
-        protocol_configs: Option<ProtocolConfigs>,
-        reference_gas_price: Option<BigInt>,
-        start_timestamp: Option<ChronoDateTime<Utc>>,
+        pub epoch_id: u64,
+        pub protocol_configs: Option<ProtocolConfigs>,
+        pub reference_gas_price: Option<BigInt>,
+        pub start_timestamp: Option<ChronoDateTime<Utc>>,
     }
 
     #[derive(cynic::QueryFragment)]
-    pub(crate) struct ProtocolConfigs {
-        protocol_version: u64,
+    pub struct ProtocolConfigs {
+        pub protocol_version: u64,
     }
 
     pub(crate) async fn query(
