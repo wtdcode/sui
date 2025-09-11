@@ -6,7 +6,7 @@
 use crate::offchain_state::OffchainStateReader;
 use crate::simulator_persisted_store::PersistedStore;
 use crate::{args::*, programmable_transaction_test_parser::parser::ParsedCommand};
-use crate::{TransactionalAdapter, ValidatorWithFullnode};
+use crate::{cursor, TransactionalAdapter, ValidatorWithFullnode};
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use bimap::btree::BiBTreeMap;
@@ -21,7 +21,7 @@ use move_command_line_common::files::verify_and_create_named_address_mapping;
 use move_compiler::{
     editions::{Edition, Flavor},
     shared::{NumberFormat, NumericalAddress, PackageConfig, PackagePaths},
-    Flags, FullyCompiledProgram,
+    Flags, PreCompiledProgramInfo,
 };
 use move_core_types::ident_str;
 use move_core_types::parsing::address::ParsedAddress;
@@ -336,7 +336,7 @@ impl MoveTestAdapter<'_> for SuiTestAdapter {
 
     async fn init(
         default_syntax: SyntaxChoice,
-        pre_compiled_deps: Option<Arc<FullyCompiledProgram>>,
+        pre_compiled_deps: Option<Arc<PreCompiledProgramInfo>>,
         task_opt: Option<
             move_transactional_test_runner::tasks::TaskInput<(
                 move_transactional_test_runner::tasks::InitCommand,
@@ -764,24 +764,9 @@ impl MoveTestAdapter<'_> for SuiTestAdapter {
                 let latest_chk = self.executor.get_latest_checkpoint_sequence_number()?;
                 Ok(Some(format!("Checkpoint created: {}", latest_chk)))
             }
-            SuiSubcommand::AdvanceEpoch(AdvanceEpochCommand {
-                count,
-                create_random_state,
-                create_authenticator_state,
-                create_deny_list_state,
-                create_bridge_state,
-                create_bridge_committee,
-            }) => {
-                for _ in 0..count.unwrap_or(1) {
-                    self.executor
-                        .advance_epoch(
-                            create_random_state,
-                            create_authenticator_state,
-                            create_deny_list_state,
-                            create_bridge_state,
-                            create_bridge_committee,
-                        )
-                        .await?;
+            SuiSubcommand::AdvanceEpoch(cmd) => {
+                for _ in 0..cmd.count.unwrap_or(1) {
+                    self.executor.advance_epoch((&cmd).into()).await?;
                 }
                 let epoch = self.get_latest_epoch_id()?;
                 Ok(Some(format!("Epoch advanced: {epoch}")))
@@ -1500,33 +1485,6 @@ impl SuiTestAdapter {
         Ok(interpolated_contents)
     }
 
-    fn encode_cursor(&self, cursor: &str) -> anyhow::Result<String> {
-        // Cursor format is either bcs(object_id,n1,n2,...) or a json value,
-        // in which case we just return its base64 encoding.
-        let Some(args) = cursor
-            .strip_prefix("bcs(")
-            .and_then(|c| c.strip_suffix(")"))
-        else {
-            return Ok(Base64::encode(cursor));
-        };
-
-        let mut parts = args.split(",");
-
-        let id: ObjectID = parts
-            .next()
-            .context("bcs(...) cursors must have at least one argument")?
-            .trim()
-            .parse()?;
-
-        let mut bytes = bcs::to_bytes(&id.to_vec())?;
-        for part in parts {
-            let n: u64 = part.trim().parse()?;
-            bytes.extend(bcs::to_bytes(&n)?);
-        }
-
-        Ok(Base64::encode(bytes))
-    }
-
     fn interpolate_query(
         &self,
         contents: &str,
@@ -1542,11 +1500,13 @@ impl SuiTestAdapter {
 
         // Then interpolate the cursors which may reference objects
         for (idx, s) in cursors.iter().enumerate() {
-            let interpolated_cursor = self.interpolate_contents(s, &variables)?;
-            let encoded_cursor = self.encode_cursor(&interpolated_cursor)?;
+            // Try and parse the encoded cursor, if it fails, assume the cursor is a plain
+            // JSON cursor.
+            let c = self.interpolate_contents(s, &variables)?;
+            let encoded = Base64::encode(cursor::parse(&c).unwrap_or_else(|_| c.into_bytes()));
 
             // Add the encoded cursor to the variables map because they may get used in the query.
-            variables.insert(format!("cursor_{idx}"), encoded_cursor);
+            variables.insert(format!("cursor_{idx}"), encoded);
         }
         self.interpolate_contents(contents, &variables)
     }
@@ -1821,7 +1781,7 @@ impl SuiTestAdapter {
         }
 
         let mut unchanged_shared_ids = effects
-            .unchanged_shared_objects()
+            .unchanged_consensus_objects()
             .iter()
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
@@ -2307,7 +2267,7 @@ static NAMED_ADDRESSES: Lazy<BTreeMap<String, NumericalAddress>> = Lazy::new(|| 
     map
 });
 
-pub static PRE_COMPILED: Lazy<FullyCompiledProgram> = Lazy::new(|| {
+pub static PRE_COMPILED: Lazy<PreCompiledProgramInfo> = Lazy::new(|| {
     // TODO invoke package system? Or otherwise pull the versions for these packages as per their
     // actual Move.toml files. They way they are treated here is odd, too, though.
     let sui_files: &Path = Path::new(DEFAULT_FRAMEWORK_PATH);
@@ -2341,7 +2301,7 @@ pub static PRE_COMPILED: Lazy<FullyCompiledProgram> = Lazy::new(|| {
         buf.extend(["packages", "bridge", "sources"]);
         buf.to_string_lossy().to_string()
     };
-    let fully_compiled_res = move_compiler::construct_pre_compiled_lib(
+    let pre_compiled_program = move_compiler::construct_pre_compiled_lib(
         vec![PackagePaths {
             name: Some(("sui-framework".into(), config)),
             paths: vec![
@@ -2358,7 +2318,7 @@ pub static PRE_COMPILED: Lazy<FullyCompiledProgram> = Lazy::new(|| {
         None,
     )
     .unwrap();
-    match fully_compiled_res {
+    match pre_compiled_program {
         Err((files, diags)) => {
             eprintln!("!!!Sui framework failed to compile!!!");
             move_compiler::diagnostics::report_diagnostics(&files, diags)

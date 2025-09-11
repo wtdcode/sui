@@ -19,8 +19,8 @@ use sui_indexer_alt_consistent_api::proto::rpc::consistent::v1alpha::{
     consistent_service_client::ConsistentServiceClient, AvailableRangeRequest,
 };
 use sui_indexer_alt_consistent_store::{
-    args::RpcArgs as ConsistentArgs, config::ServiceConfig as ConsistentConfig,
-    start_service as start_consistent_store,
+    args::RpcArgs as ConsistentArgs, args::TlsArgs as ConsistentTlsArgs,
+    config::ServiceConfig as ConsistentConfig, start_service as start_consistent_store,
 };
 use sui_indexer_alt_framework::{ingestion::ClientArgs, postgres::schema::watermarks, IndexerArgs};
 use sui_indexer_alt_graphql::{
@@ -31,7 +31,8 @@ use sui_indexer_alt_jsonrpc::{
     RpcArgs as JsonRpcArgs,
 };
 use sui_indexer_alt_reader::{
-    bigtable_reader::BigtableArgs, system_package_task::SystemPackageTaskArgs,
+    bigtable_reader::BigtableArgs, consistent_reader::ConsistentReaderArgs,
+    full_node_client::FullNodeArgs, system_package_task::SystemPackageTaskArgs,
 };
 use sui_pg_db::{
     temp::{get_available_port, TempDb},
@@ -235,8 +236,11 @@ impl FullCluster {
         let consistent_store = self
             .offchain
             .wait_for_consistent_store(checkpoint.sequence_number, Duration::from_secs(10));
+        let graphql = self
+            .offchain
+            .wait_for_graphql(checkpoint.sequence_number, Duration::from_secs(10));
 
-        try_join!(indexer, consistent_store)
+        try_join!(indexer, consistent_store, graphql)
             .expect("Timed out waiting for indexer and consistent store");
 
         checkpoint
@@ -291,6 +295,16 @@ impl FullCluster {
             .await
     }
 
+    /// Waits until GraphQL has caught up to the given `checkpoint`, or the `timeout` is
+    /// reached (an error).
+    pub async fn wait_for_graphql(
+        &self,
+        checkpoint: u64,
+        timeout: Duration,
+    ) -> Result<(), Elapsed> {
+        self.offchain.wait_for_graphql(checkpoint, timeout).await
+    }
+
     /// Triggers cancellation of all downstream services, waits for them to stop, cleans up the
     /// temporary database, and the temporary directory used for ingestion.
     pub async fn stopped(self) {
@@ -335,6 +349,7 @@ impl OffchainCluster {
 
         let consistent_args = ConsistentArgs {
             rpc_listen_address: consistent_listen_address,
+            tls: ConsistentTlsArgs::default(),
         };
 
         let jsonrpc_args = JsonRpcArgs {
@@ -396,11 +411,20 @@ impl OffchainCluster {
         .await
         .context("Failed to start JSON-RPC server")?;
 
+        let consistent_reader_args = ConsistentReaderArgs {
+            consistent_store_url: Some(
+                Url::parse(&format!("http://{consistent_listen_address}")).unwrap(),
+            ),
+            consistent_store_statement_timeout_ms: None,
+        };
+
         let graphql = start_graphql(
             Some(database_url.clone()),
             None,
+            FullNodeArgs::default(),
             DbArgs::default(),
             BigtableArgs::default(),
+            consistent_reader_args,
             graphql_args,
             SystemPackageTaskArgs::default(),
             "0.0.0",
