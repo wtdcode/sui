@@ -137,7 +137,7 @@ p2p-config:
   anemo-config:
     max-concurrent-connections: 0
   seed-peers:
-    - address: <multiaddr>  # The p2p address of the Full node
+    - address: <multiaddr>  # The p2p address of the full node
       peer-id: <peer-id>    # hex encoded network public key of the node
     - address: ...          # another permitted peer
       peer-id: ...
@@ -176,7 +176,7 @@ To update metadata, a validator makes a `MoveCall` transaction that interacts wi
 
 1. To update `name` to `new_validator_name`, use the Sui Client CLI to call `sui_system::update_validator_name`:
 
-{@include: ../../../snippets/info-gas-budget.mdx}
+<ImportContent source="info-gas-budget.mdx" mode="snippet" />
 
 ```sh
 $ sui client call --package 0x3 --module sui_system --function update_validator_name --args 0x5 \"new_validator_name\" --gas-budget 10000

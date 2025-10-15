@@ -3,7 +3,9 @@
 
 use std::{
     collections::HashMap,
+    fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::Path,
     time::Duration,
 };
 
@@ -11,10 +13,9 @@ use anyhow::{bail, ensure, Context};
 use diesel::{ExpressionMethods, OptionalExtension, QueryDsl};
 use diesel_async::RunQueryDsl;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use simulacrum::Simulacrum;
-use sui_indexer_alt::{config::IndexerConfig, setup_indexer};
+use sui_indexer_alt::{config::IndexerConfig, setup_indexer, BootstrapGenesis};
 use sui_indexer_alt_consistent_api::proto::rpc::consistent::v1alpha::{
     consistent_service_client::ConsistentServiceClient, AvailableRangeRequest,
 };
@@ -32,12 +33,14 @@ use sui_indexer_alt_jsonrpc::{
 };
 use sui_indexer_alt_reader::{
     bigtable_reader::BigtableArgs, consistent_reader::ConsistentReaderArgs,
-    full_node_client::FullNodeArgs, system_package_task::SystemPackageTaskArgs,
+    fullnode_client::FullnodeArgs, system_package_task::SystemPackageTaskArgs,
 };
 use sui_pg_db::{
     temp::{get_available_port, TempDb},
     Db, DbArgs,
 };
+use sui_storage::blob::{Blob, BlobEncoding};
+use sui_types::full_checkpoint_content::CheckpointData;
 use sui_types::{
     base_types::{ObjectRef, SuiAddress},
     crypto::AccountKeyPair,
@@ -124,18 +127,24 @@ pub struct OffchainCluster {
     cancel: CancellationToken,
 }
 
+pub struct OffchainClusterConfig {
+    pub indexer_args: IndexerArgs,
+    pub consistent_indexer_args: IndexerArgs,
+    pub fullnode_args: FullnodeArgs,
+    pub indexer_config: IndexerConfig,
+    pub consistent_config: ConsistentConfig,
+    pub jsonrpc_config: JsonRpcConfig,
+    pub graphql_config: GraphQlConfig,
+    pub bootstrap_genesis: Option<BootstrapGenesis>,
+}
+
 impl FullCluster {
     /// Creates a cluster with a fresh executor where the off-chain services are set up with a
     /// default configuration.
     pub async fn new() -> anyhow::Result<Self> {
         Self::new_with_configs(
             Simulacrum::new(),
-            IndexerArgs::default(),
-            IndexerArgs::default(),
-            IndexerConfig::for_test(),
-            ConsistentConfig::for_test(),
-            JsonRpcConfig::default(),
-            GraphQlConfig::default(),
+            OffchainClusterConfig::default(),
             &prometheus::Registry::new(),
             CancellationToken::new(),
         )
@@ -147,39 +156,16 @@ impl FullCluster {
     /// `jsonrpc_config`, and the GraphQL server is configured using `graphql_config`.
     pub async fn new_with_configs(
         mut executor: Simulacrum,
-        indexer_args: IndexerArgs,
-        consistent_indexer_args: IndexerArgs,
-        indexer_config: IndexerConfig,
-        consistent_config: ConsistentConfig,
-        jsonrpc_config: JsonRpcConfig,
-        graphql_config: GraphQlConfig,
+        offchain_cluster_config: OffchainClusterConfig,
         registry: &prometheus::Registry,
         cancel: CancellationToken,
     ) -> anyhow::Result<Self> {
-        let temp_dir = tempfile::tempdir().context("Failed to create data ingestion path")?;
+        let (client_args, temp_dir) = local_ingestion_client_args();
         executor.set_data_ingestion_path(temp_dir.path().to_owned());
 
-        let client_args = ClientArgs {
-            local_ingestion_path: Some(temp_dir.path().to_owned()),
-            remote_store_url: None,
-            rpc_api_url: None,
-            rpc_username: None,
-            rpc_password: None,
-        };
-
-        let offchain = OffchainCluster::new(
-            indexer_args,
-            consistent_indexer_args,
-            client_args,
-            indexer_config,
-            consistent_config,
-            jsonrpc_config,
-            graphql_config,
-            registry,
-            cancel,
-        )
-        .await
-        .context("Failed to create off-chain cluster")?;
+        let offchain = OffchainCluster::new(client_args, offchain_cluster_config, registry, cancel)
+            .await
+            .context("Failed to create off-chain cluster")?;
 
         Ok(Self {
             executor,
@@ -321,13 +307,17 @@ impl OffchainCluster {
     /// - `graphql_config` controls the GraphQL server.
     /// - `registry` is used to register metrics for the indexer, JSON-RPC, and GraphQL servers.
     pub async fn new(
-        indexer_args: IndexerArgs,
-        consistent_indexer_args: IndexerArgs,
         client_args: ClientArgs,
-        indexer_config: IndexerConfig,
-        consistent_config: ConsistentConfig,
-        jsonrpc_config: JsonRpcConfig,
-        graphql_config: GraphQlConfig,
+        OffchainClusterConfig {
+            indexer_args,
+            consistent_indexer_args,
+            fullnode_args,
+            indexer_config,
+            consistent_config,
+            jsonrpc_config,
+            graphql_config,
+            bootstrap_genesis,
+        }: OffchainClusterConfig,
         registry: &prometheus::Registry,
         cancel: CancellationToken,
     ) -> anyhow::Result<Self> {
@@ -366,14 +356,13 @@ impl OffchainCluster {
             .await
             .context("Failed to connect to database")?;
 
-        let with_genesis = true;
         let indexer = setup_indexer(
             database_url.clone(),
             DbArgs::default(),
             indexer_args,
             client_args.clone(),
             indexer_config,
-            with_genesis,
+            bootstrap_genesis,
             registry,
             cancel.child_token(),
         )
@@ -421,7 +410,7 @@ impl OffchainCluster {
         let graphql = start_graphql(
             Some(database_url.clone()),
             None,
-            FullNodeArgs::default(),
+            fullnode_args,
             DbArgs::default(),
             BigtableArgs::default(),
             consistent_reader_args,
@@ -548,33 +537,51 @@ impl OffchainCluster {
             .await
             .context("Request to GraphQL server failed")?;
 
-        #[derive(Serialize, Deserialize)]
-        struct Response {
-            data: Data,
-        }
-
-        #[derive(Serialize, Deserialize)]
-        struct Data {
-            checkpoint: Checkpoint,
-        }
-
-        #[derive(Serialize, Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Checkpoint {
-            sequence_number: i64,
-        }
-
-        let body: Response = response
+        let body: Value = response
             .json()
             .await
             .context("Failed to parse GraphQL response")?;
 
-        ensure!(
-            body.data.checkpoint.sequence_number != i64::MAX,
-            "Indexer has not started yet",
-        );
+        let sequence_number = body
+            .pointer("/data/checkpoint/sequenceNumber")
+            .context("Failed to find checkpoint sequence number in response")?;
 
-        Ok(body.data.checkpoint.sequence_number as u64)
+        let sequence_number: i64 = serde_json::from_value(sequence_number.clone())
+            .context("Failed to parse sequence number as i64")?;
+
+        ensure!(sequence_number != i64::MAX, "Indexer has not started yet");
+
+        Ok(sequence_number as u64)
+    }
+
+    /// Returns the latest epoch that the GraphQL service is aware of.
+    pub async fn latest_graphql_epoch(&self) -> anyhow::Result<u64> {
+        let query = json!({
+            "query": "query { epoch { epochId } }"
+        });
+
+        let client = Client::new();
+        let request = client.post(self.graphql_url()).json(&query);
+        let response = request
+            .send()
+            .await
+            .context("Request to GraphQL server failed")?;
+
+        let body: Value = response
+            .json()
+            .await
+            .context("Failed to parse GraphQL response")?;
+
+        let epoch_id = body
+            .pointer("/data/epoch/epochId")
+            .context("Failed to find epochId in response")?;
+
+        let epoch_id: i64 =
+            serde_json::from_value(epoch_id.clone()).context("Failed to parse epochId as i64")?;
+
+        ensure!(epoch_id != i64::MAX, "Indexer has not started yet");
+
+        Ok(epoch_id as u64)
     }
 
     /// Waits until the indexer has caught up to the given `checkpoint`, or the `timeout` is
@@ -664,6 +671,21 @@ impl OffchainCluster {
     }
 }
 
+impl Default for OffchainClusterConfig {
+    fn default() -> Self {
+        Self {
+            indexer_args: Default::default(),
+            consistent_indexer_args: Default::default(),
+            fullnode_args: Default::default(),
+            indexer_config: IndexerConfig::for_test(),
+            consistent_config: ConsistentConfig::for_test(),
+            jsonrpc_config: Default::default(),
+            graphql_config: Default::default(),
+            bootstrap_genesis: None,
+        }
+    }
+}
+
 /// Returns the reference for the first address-owned object created in the effects, or an error if
 /// there is none.
 pub fn find_address_owned(fx: &TransactionEffects) -> anyhow::Result<ObjectRef> {
@@ -674,6 +696,24 @@ pub fn find_address_owned(fx: &TransactionEffects) -> anyhow::Result<ObjectRef> 
     fx.created()
         .into_iter()
         .find_map(|(oref, owner)| matches!(owner, Owner::AddressOwner(_)).then_some(oref))
+        .context("Could not find created object")
+}
+
+/// Returns the reference for the first address-owned object created in the effects owned by
+/// `owner`, or an error if there is none.
+pub fn find_address_owned_by(
+    fx: &TransactionEffects,
+    owner: SuiAddress,
+) -> anyhow::Result<ObjectRef> {
+    if let ExecutionStatus::Failure { error, command } = fx.status() {
+        bail!("Transaction failed: {error} (command {command:?})");
+    }
+
+    fx.created()
+        .into_iter()
+        .find_map(|(oref, o)| {
+            matches!(o, Owner::AddressOwner(addr) if addr == owner).then_some(oref)
+        })
         .context("Could not find created object")
 }
 
@@ -714,4 +754,28 @@ pub fn find_address_mutated(fx: &TransactionEffects) -> anyhow::Result<ObjectRef
         .into_iter()
         .find_map(|(oref, owner)| matches!(owner, Owner::AddressOwner(_)).then_some(oref))
         .context("Could not find mutated object")
+}
+
+/// Returns ClientArgs that use a temporary local ingestion path and the TempDir of that path.
+pub fn local_ingestion_client_args() -> (ClientArgs, TempDir) {
+    let temp_dir = tempfile::tempdir()
+        .context("Failed to create data ingestion path")
+        .unwrap();
+    let client_args = ClientArgs {
+        local_ingestion_path: Some(temp_dir.path().to_owned()),
+        remote_store_url: None,
+        rpc_api_url: None,
+        rpc_username: None,
+        rpc_password: None,
+    };
+    (client_args, temp_dir)
+}
+
+/// Writes a checkpoint file to the given path.
+pub async fn write_checkpoint(path: &Path, checkpoint_data: CheckpointData) -> anyhow::Result<()> {
+    let file_name = format!("{}.chk", checkpoint_data.checkpoint_summary.sequence_number);
+    let file_path = path.join(file_name);
+    let blob = Blob::encode(&checkpoint_data, BlobEncoding::Bcs)?;
+    fs::write(file_path, blob.to_bytes())?;
+    Ok(())
 }

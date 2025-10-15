@@ -4,6 +4,7 @@
 use super::object_change::{AccumulatorWriteV1, ObjectIn, ObjectOut};
 use super::{EffectsObjectChange, IDOperation, ObjectChange};
 use crate::accumulator_event::AccumulatorEvent;
+use crate::accumulator_root::AccumulatorObjId;
 use crate::base_types::{
     EpochId, ObjectDigest, ObjectID, ObjectRef, SequenceNumber, SuiAddress, TransactionDigest,
     VersionDigest,
@@ -272,6 +273,30 @@ impl TransactionEffectsAPI for TransactionEffectsV2 {
             .collect()
     }
 
+    fn written(&self) -> Vec<ObjectRef> {
+        self.changed_objects
+            .iter()
+            .filter_map(
+                |(id, change)| match (&change.output_state, &change.id_operation) {
+                    (ObjectOut::NotExist, IDOperation::Deleted) => Some((
+                        *id,
+                        self.lamport_version,
+                        ObjectDigest::OBJECT_DIGEST_DELETED,
+                    )),
+                    (ObjectOut::NotExist, IDOperation::None) => Some((
+                        *id,
+                        self.lamport_version,
+                        ObjectDigest::OBJECT_DIGEST_WRAPPED,
+                    )),
+                    (ObjectOut::ObjectWrite((d, _)), _) => Some((*id, self.lamport_version, *d)),
+                    (ObjectOut::PackageWrite(vd), _) => Some((*id, vd.0, vd.1)),
+                    (ObjectOut::AccumulatorWriteV1(_), _) => None,
+                    _ => None,
+                },
+            )
+            .collect()
+    }
+
     fn transferred_from_consensus(&self) -> Vec<ObjectRef> {
         self.changed_objects
             .iter()
@@ -387,9 +412,10 @@ impl TransactionEffectsAPI for TransactionEffectsV2 {
         self.changed_objects
             .iter()
             .filter_map(|(id, change)| match &change.output_state {
-                ObjectOut::AccumulatorWriteV1(write) => {
-                    Some(AccumulatorEvent::new(*id, write.clone()))
-                }
+                ObjectOut::AccumulatorWriteV1(write) => Some(AccumulatorEvent::new(
+                    AccumulatorObjId::new_unchecked(*id),
+                    write.clone(),
+                )),
                 _ => None,
             })
             .collect()

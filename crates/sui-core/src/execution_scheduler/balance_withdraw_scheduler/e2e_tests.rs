@@ -8,7 +8,9 @@ use std::time::Duration;
 use move_core_types::language_storage::TypeTag;
 use sui_protocol_config::ProtocolConfig;
 use sui_test_transaction_builder::TestTransactionBuilder;
-use sui_types::accumulator_root::{update_account_balance_for_testing, AccumulatorValue};
+use sui_types::accumulator_root::{
+    update_account_balance_for_testing, AccumulatorObjId, AccumulatorValue,
+};
 use sui_types::balance::Balance;
 use sui_types::base_types::ObjectID;
 use sui_types::digests::TransactionDigest;
@@ -21,7 +23,7 @@ use sui_types::{
     gas_coin::GAS,
     object::Object,
     programmable_transaction_builder::ProgrammableTransactionBuilder,
-    transaction::BalanceWithdrawArg,
+    transaction::FundsWithdrawalArg,
 };
 use tokio::sync::mpsc::{self, unbounded_channel};
 use tokio::time::timeout;
@@ -33,9 +35,7 @@ use crate::{
         test_authority_builder::TestAuthorityBuilder,
         AuthorityState, ExecutionEnv,
     },
-    execution_scheduler::{
-        ExecutionScheduler, ExecutionSchedulerAPI, ExecutionSchedulerWrapper, PendingCertificate,
-    },
+    execution_scheduler::{ExecutionScheduler, PendingCertificate},
 };
 
 struct TestEnv {
@@ -44,7 +44,7 @@ struct TestEnv {
     gas_object: Object,
     account_objects: Vec<ObjectID>,
     rx_ready_certificates: mpsc::UnboundedReceiver<PendingCertificate>,
-    scheduler: Arc<ExecutionSchedulerWrapper>,
+    scheduler: Arc<ExecutionScheduler>,
     state: Arc<AuthorityState>,
 }
 
@@ -69,15 +69,13 @@ async fn create_test_env(init_balances: BTreeMap<TypeTag, u64>) -> TestEnv {
         .with_starting_objects(&starting_objects)
         .build()
         .await;
-    let scheduler = Arc::new(ExecutionSchedulerWrapper::ExecutionScheduler(
-        ExecutionScheduler::new(
-            state.get_object_cache_reader().clone(),
-            state.get_child_object_resolver().clone(),
-            state.get_transaction_cache_reader().clone(),
-            tx_ready_certificates,
-            true,
-            state.metrics.clone(),
-        ),
+    let scheduler = Arc::new(ExecutionScheduler::new(
+        state.get_object_cache_reader().clone(),
+        state.get_child_object_resolver().clone(),
+        state.get_transaction_cache_reader().clone(),
+        tx_ready_certificates,
+        &state.epoch_store_for_testing(),
+        state.metrics.clone(),
     ));
     TestEnv {
         sender,
@@ -91,18 +89,15 @@ async fn create_test_env(init_balances: BTreeMap<TypeTag, u64>) -> TestEnv {
 }
 
 impl TestEnv {
-    fn create_transactions(&self, amounts: Vec<Option<u64>>) -> Vec<VerifiedExecutableTransaction> {
+    fn create_transactions(&self, amounts: Vec<u64>) -> Vec<VerifiedExecutableTransaction> {
         amounts
             .into_iter()
             .enumerate()
             .map(|(idx, amount)| {
-                let withdraw = if let Some(amount) = amount {
-                    BalanceWithdrawArg::new_with_amount(amount, GAS::type_tag().into())
-                } else {
-                    BalanceWithdrawArg::new_with_entire_balance(GAS::type_tag().into())
-                };
+                let withdraw =
+                    FundsWithdrawalArg::balance_from_sender(amount, GAS::type_tag().into());
                 let mut ptb = ProgrammableTransactionBuilder::new();
-                ptb.balance_withdraw(withdraw).unwrap();
+                ptb.funds_withdrawal(withdraw).unwrap();
                 let tx_data = TestTransactionBuilder::new(
                     self.sender,
                     self.gas_object.compute_object_reference(),
@@ -171,16 +166,23 @@ impl TestEnv {
     }
 
     fn settle_balances(&mut self, balance_changes: BTreeMap<ObjectID, i128>) {
+        let balance_changes: BTreeMap<AccumulatorObjId, i128> = balance_changes
+            .into_iter()
+            .map(|(object_id, balance_change)| {
+                (AccumulatorObjId::new_unchecked(object_id), balance_change)
+            })
+            .collect();
         let mut accumulator_object = self.get_accumulator_object();
         let next_version = accumulator_object.version().next();
         self.scheduler.settle_balances(BalanceSettlement {
+            next_accumulator_version: next_version,
             balance_changes: balance_changes.clone(),
         });
         for (object_id, balance_change) in balance_changes {
             let mut account_object = self
                 .state
                 .get_object_cache_reader()
-                .get_object(&object_id)
+                .get_object(object_id.inner())
                 .unwrap();
             update_account_balance_for_testing(&mut account_object, balance_change);
             account_object
@@ -207,7 +209,7 @@ impl TestEnv {
 async fn test_withdraw_schedule_e2e() {
     telemetry_subscribers::init_for_testing();
     let mut test_env = create_test_env(BTreeMap::from([(GAS::type_tag(), 1000)])).await;
-    let transactions: Vec<_> = test_env.create_transactions(vec![Some(400), Some(600), Some(1)]);
+    let transactions: Vec<_> = test_env.create_transactions(vec![400, 600, 1]);
     test_env.enqueue_transactions(transactions.clone());
     test_env
         .expect_withdraw_results(BTreeMap::from([
@@ -226,7 +228,7 @@ async fn test_withdraw_schedule_e2e() {
         ]))
         .await;
 
-    let transactions: Vec<_> = test_env.create_transactions(vec![Some(500), Some(500)]);
+    let transactions: Vec<_> = test_env.create_transactions(vec![500, 500]);
     let next_version = test_env.get_accumulator_version().next();
     test_env.enqueue_transactions_with_version(transactions.clone(), next_version);
     assert!(test_env.receive_certificate().await.is_none());
@@ -247,7 +249,7 @@ async fn test_withdraw_schedule_e2e() {
 
     test_env.settle_balances(BTreeMap::from([(test_env.account_objects[0], -500)]));
 
-    let transactions = test_env.create_transactions(vec![None]);
+    let transactions = test_env.create_transactions(vec![501]);
 
     test_env.enqueue_transactions(transactions.clone());
 

@@ -19,8 +19,9 @@ use crate::{
 use futures::stream::{FuturesUnordered, StreamExt};
 use mysten_common::debug_fatal;
 use mysten_metrics::spawn_monitored_task;
+use parking_lot::Mutex;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 use sui_config::node::AuthorityOverloadConfig;
@@ -36,7 +37,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::Instant;
 use tracing::{debug, error};
 
-use super::{overload_tracker::OverloadTracker, ExecutionSchedulerAPI, PendingCertificate};
+use super::{overload_tracker::OverloadTracker, PendingCertificate};
 
 #[derive(Clone)]
 pub struct ExecutionScheduler {
@@ -44,7 +45,7 @@ pub struct ExecutionScheduler {
     transaction_cache_read: Arc<dyn TransactionCacheRead>,
     overload_tracker: Arc<OverloadTracker>,
     tx_ready_certificates: UnboundedSender<PendingCertificate>,
-    balance_withdraw_scheduler: Option<Arc<BalanceWithdrawScheduler>>,
+    balance_withdraw_scheduler: Arc<Mutex<Option<BalanceWithdrawScheduler>>>,
     metrics: Arc<AuthorityMetrics>,
 }
 
@@ -84,22 +85,16 @@ impl ExecutionScheduler {
         child_object_resolver: Arc<dyn ChildObjectResolver + Send + Sync>,
         transaction_cache_read: Arc<dyn TransactionCacheRead>,
         tx_ready_certificates: UnboundedSender<PendingCertificate>,
-        balance_accumulator_enabled: bool,
+        epoch_store: &Arc<AuthorityPerEpochStore>,
         metrics: Arc<AuthorityMetrics>,
     ) -> Self {
         tracing::info!("Creating new ExecutionScheduler");
-        let balance_withdraw_scheduler = if balance_accumulator_enabled {
-            let starting_accumulator_version = object_cache_read
-                .get_object(&SUI_ACCUMULATOR_ROOT_OBJECT_ID)
-                .expect("Accumulator root object must be present if balance accumulator is enabled")
-                .version();
-            Some(BalanceWithdrawScheduler::new(
-                Arc::new(child_object_resolver),
-                starting_accumulator_version,
-            ))
-        } else {
-            None
-        };
+        let balance_withdraw_scheduler =
+            Arc::new(Mutex::new(Self::initialize_balance_withdraw_scheduler(
+                epoch_store,
+                &object_cache_read,
+                child_object_resolver,
+            )));
         Self {
             object_cache_read,
             transaction_cache_read,
@@ -108,6 +103,26 @@ impl ExecutionScheduler {
             balance_withdraw_scheduler,
             metrics,
         }
+    }
+
+    fn initialize_balance_withdraw_scheduler(
+        epoch_store: &Arc<AuthorityPerEpochStore>,
+        object_cache_read: &Arc<dyn ObjectCacheRead>,
+        child_object_resolver: Arc<dyn ChildObjectResolver + Send + Sync>,
+    ) -> Option<BalanceWithdrawScheduler> {
+        let withdraw_scheduler_enabled =
+            epoch_store.is_validator() && epoch_store.accumulators_enabled();
+        if !withdraw_scheduler_enabled {
+            return None;
+        }
+        let starting_accumulator_version = object_cache_read
+            .get_object(&SUI_ACCUMULATOR_ROOT_OBJECT_ID)
+            .expect("Accumulator root object must be present if balance accumulator is enabled")
+            .version();
+        Some(BalanceWithdrawScheduler::new(
+            Arc::new(child_object_resolver),
+            starting_accumulator_version,
+        ))
     }
 
     async fn schedule_transaction(
@@ -214,7 +229,6 @@ impl ExecutionScheduler {
         let pending_cert = PendingCertificate {
             certificate: cert.clone(),
             execution_env,
-            waiting_input_objects: BTreeSet::new(),
             stats: PendingCertificateStats {
                 enqueue_time,
                 ready_time: Some(Instant::now()),
@@ -236,16 +250,12 @@ impl ExecutionScheduler {
         if certs.is_empty() {
             return;
         }
-        let scheduler = self
-            .balance_withdraw_scheduler
-            .as_ref()
-            .expect("Balance withdraw scheduler must be enabled if there are withdraws");
         let mut withdraws = BTreeMap::new();
         let mut prev_version = None;
         for (cert, version, _) in &certs {
             let tx_withdraws = cert
                 .transaction_data()
-                .process_balance_withdraws()
+                .process_funds_withdrawals()
                 .expect("Balance withdraws should have already been checked");
             assert!(!tx_withdraws.is_empty());
             if let Some(prev_version) = prev_version {
@@ -263,8 +273,15 @@ impl ExecutionScheduler {
                 });
         }
         let mut receivers = FuturesUnordered::new();
-        for (version, tx_withdraws) in withdraws {
-            receivers.extend(scheduler.schedule_withdraws(version, tx_withdraws));
+        {
+            let guard = self.balance_withdraw_scheduler.lock();
+            let withdraw_scheduler = guard
+                .as_ref()
+                .expect("Balance withdraw scheduler must be enabled if there are withdraws");
+            for (version, tx_withdraws) in withdraws {
+                receivers.extend(withdraw_scheduler.schedule_withdraws(version, tx_withdraws));
+            }
+            // guard will be dropped here
         }
         let scheduler = self.clone();
         let epoch_store = epoch_store.clone();
@@ -398,8 +415,8 @@ impl ExecutionScheduler {
     }
 }
 
-impl ExecutionSchedulerAPI for ExecutionScheduler {
-    fn enqueue(
+impl ExecutionScheduler {
+    pub fn enqueue(
         &self,
         certs: Vec<(Schedulable, ExecutionEnv)>,
         epoch_store: &Arc<AuthorityPerEpochStore>,
@@ -438,7 +455,7 @@ impl ExecutionSchedulerAPI for ExecutionScheduler {
         self.schedule_settlement_transactions(settlement_txns, epoch_store);
     }
 
-    fn enqueue_transactions(
+    pub fn enqueue_transactions(
         &self,
         certs: Vec<(VerifiedExecutableTransaction, ExecutionEnv)>,
         epoch_store: &Arc<AuthorityPerEpochStore>,
@@ -498,14 +515,31 @@ impl ExecutionSchedulerAPI for ExecutionScheduler {
             .inc_by(already_executed_certs_num);
     }
 
-    fn settle_balances(&self, settlement: BalanceSettlement) {
+    pub fn settle_balances(&self, settlement: BalanceSettlement) {
         self.balance_withdraw_scheduler
+            .lock()
             .as_ref()
             .expect("Balance withdraw scheduler must be enabled if there are settlements")
             .settle_balances(settlement);
     }
 
-    fn check_execution_overload(
+    /// Reconfigure internal state at epoch start. This resets the balance withdraw scheduler
+    /// to the current accumulator root object version.
+    pub fn reconfigure(
+        &self,
+        new_epoch_store: &Arc<AuthorityPerEpochStore>,
+        child_object_resolver: &Arc<dyn ChildObjectResolver + Send + Sync>,
+    ) {
+        let scheduler = Self::initialize_balance_withdraw_scheduler(
+            new_epoch_store,
+            &self.object_cache_read,
+            child_object_resolver.clone(),
+        );
+        let mut guard = self.balance_withdraw_scheduler.lock();
+        *guard = scheduler;
+    }
+
+    pub fn check_execution_overload(
         &self,
         overload_config: &AuthorityOverloadConfig,
         tx_data: &SenderSignedData,
@@ -515,7 +549,7 @@ impl ExecutionSchedulerAPI for ExecutionScheduler {
             .check_execution_overload(overload_config, tx_data, inflight_queue_len)
     }
 
-    fn num_pending_certificates(&self) -> usize {
+    pub fn num_pending_certificates(&self) -> usize {
         (self
             .metrics
             .transaction_manager_num_pending_certificates
@@ -527,16 +561,19 @@ impl ExecutionSchedulerAPI for ExecutionScheduler {
     }
 
     #[cfg(test)]
-    fn check_empty_for_testing(&self) {
+    pub fn check_empty_for_testing(&self) {
         assert_eq!(self.num_pending_certificates(), 0);
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::{time::Duration, vec};
-
+    use super::{ExecutionScheduler, PendingCertificate};
     use crate::authority::shared_object_version_manager::AssignedVersions;
+    use crate::authority::ExecutionEnv;
+    use crate::authority::{authority_tests::init_state_with_objects, AuthorityState};
+    use crate::execution_scheduler::SchedulingSource;
+    use std::{time::Duration, vec};
     use sui_test_transaction_builder::TestTransactionBuilder;
     use sui_types::executable_transaction::VerifiedExecutableTransaction;
     use sui_types::object::Owner;
@@ -554,35 +591,21 @@ mod test {
         time::sleep,
     };
 
-    use crate::authority::ExecutionEnv;
-    use crate::authority::{authority_tests::init_state_with_objects, AuthorityState};
-    use crate::execution_scheduler::{
-        ExecutionSchedulerAPI, ExecutionSchedulerWrapper, SchedulingSource,
-    };
-
-    use super::{ExecutionScheduler, PendingCertificate};
-
     #[allow(clippy::disallowed_methods)] // allow unbounded_channel()
     fn make_execution_scheduler(
         state: &AuthorityState,
-    ) -> (
-        ExecutionSchedulerWrapper,
-        UnboundedReceiver<PendingCertificate>,
-    ) {
+    ) -> (ExecutionScheduler, UnboundedReceiver<PendingCertificate>) {
         // Create a new execution scheduler instead of reusing the authority's, to examine
         // execution_scheduler output from rx_ready_certificates.
         let (tx_ready_certificates, rx_ready_certificates) = unbounded_channel();
-        // Do not call ExecutionSchedulerWrapper::new() here, because we want to always
-        // construct an ExecutionScheduler in the tests here, not TransactionManager.
-        let execution_scheduler =
-            ExecutionSchedulerWrapper::ExecutionScheduler(ExecutionScheduler::new(
-                state.get_object_cache_reader().clone(),
-                state.get_child_object_resolver().clone(),
-                state.get_transaction_cache_reader().clone(),
-                tx_ready_certificates,
-                false,
-                state.metrics.clone(),
-            ));
+        let execution_scheduler = ExecutionScheduler::new(
+            state.get_object_cache_reader().clone(),
+            state.get_child_object_resolver().clone(),
+            state.get_transaction_cache_reader().clone(),
+            tx_ready_certificates,
+            &state.epoch_store_for_testing(),
+            state.metrics.clone(),
+        );
 
         (execution_scheduler, rx_ready_certificates)
     }

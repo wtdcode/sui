@@ -77,3 +77,7 @@ docs/content/references/framework/**
 lcov.info
 
 .sparse
+docs/content/documentation.json
+
+
+.replay

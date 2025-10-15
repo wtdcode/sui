@@ -16,12 +16,15 @@ use crate::{
     replay_txn::{get_input_objects_for_replay, ReplayTransaction},
 };
 use anyhow::Context;
-use move_core_types::{language_storage::ModuleId, resolver::ModuleResolver};
+use move_core_types::{
+    language_storage::{ModuleId, StructTag},
+    resolver::ModuleResolver,
+};
 use move_trace_format::format::MoveTraceBuilder;
+use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashSet},
-    path::PathBuf,
     sync::Arc,
 };
 use sui_execution::Executor;
@@ -40,7 +43,7 @@ use sui_types::{
     supported_protocol_versions::ProtocolConfig,
     transaction::{CheckedInputObjects, TransactionDataAPI},
 };
-use tracing::{debug, trace};
+use tracing::{debug, debug_span, trace};
 
 // Executor for the replay. Created and used by `ReplayTransaction`.
 pub struct ReplayExecutor {
@@ -58,6 +61,92 @@ pub struct TxnContextAndEffects {
     pub gas_status: SuiGasStatus,              // gas status of the replay execution
     pub object_cache: BTreeMap<ObjectID, BTreeMap<u64, Object>>, // object cache
     pub inner_store: InnerTemporaryStore,      // temporary store used during execution
+    pub checkpoint: u64,                       // checkpoint where the transaction was included
+}
+
+/// Detailed information about a Move package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageInfo {
+    pub published_id: ObjectID,
+    pub original_id: ObjectID,
+    pub module_names: Vec<String>,
+}
+
+/// Type of object in the replay cache with detailed Move information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ObjectType {
+    /// A Move package containing compiled modules
+    Package(PackageInfo),
+    /// A Move object with its struct tag
+    MoveObject(StructTag),
+}
+
+/// Entry in the replay cache summary representing an object accessed during replay.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheEntry {
+    pub object_id: ObjectID,
+    pub version: u64,
+    pub object_type: ObjectType,
+}
+
+/// Compact representation of the replay cache for serialization.
+/// Contains the execution context (epoch_id from transaction effects, checkpoint from transaction info)
+/// and a list of all objects accessed during replay, with their type information but without object content.
+/// The epoch_id represents the epoch in which the original transaction was executed.
+/// The checkpoint represents the checkpoint sequence number where the transaction was included.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplayCacheSummary {
+    pub epoch_id: u64,
+    pub checkpoint: u64,
+    /// List of objects accessed during replay with their version and type information
+    pub cache_entries: Vec<CacheEntry>,
+}
+
+impl ReplayCacheSummary {
+    /// Create a ReplayCacheSummary from the object cache, extracting detailed Move information.
+    pub fn from_cache(
+        epoch_id: u64,
+        checkpoint: u64,
+        object_cache: &BTreeMap<ObjectID, BTreeMap<u64, Object>>,
+    ) -> Self {
+        let mut cache_entries = Vec::new();
+
+        for (object_id, versions) in object_cache {
+            for (version, object) in versions {
+                let object_type = if object.is_package() {
+                    // Extract package information
+                    let package = object
+                        .data
+                        .try_as_package()
+                        .expect("Package object should have package data");
+                    let package_info = PackageInfo {
+                        published_id: package.id(),
+                        original_id: package.original_package_id(),
+                        module_names: package.serialized_module_map().keys().cloned().collect(),
+                    };
+                    ObjectType::Package(package_info)
+                } else {
+                    // Extract Move object struct tag
+                    let struct_tag = object
+                        .struct_tag()
+                        .expect("Move object should have struct tag");
+                    ObjectType::MoveObject(struct_tag)
+                };
+
+                cache_entries.push(CacheEntry {
+                    object_id: *object_id,
+                    version: *version,
+                    object_type,
+                });
+            }
+        }
+
+        Self {
+            epoch_id,
+            checkpoint,
+            cache_entries,
+        }
+    }
 }
 
 // Entry point. Executes a transaction.
@@ -76,7 +165,7 @@ pub fn execute_transaction_to_effects(
     ),
     anyhow::Error,
 > {
-    debug!("Start execution");
+    debug!(op = "execute_tx", phase = "start", "execution");
     // TODO: Hook up...
     let config_certificate_deny_set: HashSet<TransactionDigest> = HashSet::new();
 
@@ -89,9 +178,10 @@ pub fn execute_transaction_to_effects(
         object_cache,
     } = txn;
 
+    let epoch = expected_effects.executed_epoch();
+    let _span = debug_span!("execute_tx", %digest, epoch, checkpoint).entered();
     let input_objects = get_input_objects_for_replay(&txn_data, &digest, &object_cache)?;
     let protocol_config = &executor.protocol_config;
-    let epoch = expected_effects.executed_epoch();
     let epoch_data = epoch_store
         .epoch_info(epoch)?
         .ok_or_else(|| anyhow::anyhow!(format!("Epoch {} not found", epoch)))?;
@@ -148,7 +238,7 @@ pub fn execute_transaction_to_effects(
         store: _,
     } = store;
     let object_cache = object_cache.into_inner();
-    debug!("End execution");
+    debug!(op = "execute_tx", phase = "end", "execution");
     Ok((
         result,
         TxnContextAndEffects {
@@ -157,17 +247,15 @@ pub fn execute_transaction_to_effects(
             gas_status,
             object_cache,
             inner_store,
+            checkpoint,
         },
     ))
 }
 
 impl ReplayExecutor {
-    pub fn new(
-        protocol_config: ProtocolConfig,
-        enable_profiler: Option<PathBuf>,
-    ) -> Result<Self, anyhow::Error> {
+    pub fn new(protocol_config: ProtocolConfig) -> Result<Self, anyhow::Error> {
         let silent = true; // disable Move debug API
-        let executor = sui_execution::executor(&protocol_config, silent, enable_profiler)
+        let executor = sui_execution::executor(&protocol_config, silent)
             .context("Filed to create executor. ProtocolConfig inconsistency?")?;
 
         let registry = prometheus::Registry::new();
@@ -263,13 +351,17 @@ impl BackingPackageStore for ReplayStore<'_> {
             "Expected one package object for {}",
             package_id
         );
-        let (package, _version) = package.into_iter().next().unwrap().unwrap();
-        self.object_cache
-            .borrow_mut()
-            .entry(*package_id)
-            .or_default()
-            .insert(package.version().value(), package.clone());
-        Ok(Some(PackageObject::new(package)))
+        let maybe = package.into_iter().next().and_then(|o| o);
+        if let Some((package, _version)) = maybe {
+            self.object_cache
+                .borrow_mut()
+                .entry(*package_id)
+                .or_default()
+                .insert(package.version().value(), package.clone());
+            Ok(Some(PackageObject::new(package)))
+        } else {
+            Ok(None)
+        }
     }
 }
 

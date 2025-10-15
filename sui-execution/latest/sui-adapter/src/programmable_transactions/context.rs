@@ -57,6 +57,7 @@ mod checked {
     use sui_protocol_config::ProtocolConfig;
     use sui_types::{
         accumulator_event::AccumulatorEvent,
+        accumulator_root::AccumulatorObjId,
         balance::Balance,
         base_types::{MoveObjectType, ObjectID, SuiAddress, TxContext},
         coin::Coin,
@@ -222,26 +223,6 @@ mod checked {
                 metrics.clone(),
                 tx_context.clone(),
             );
-
-            // Set the profiler if in CLI
-            #[skip_checked_arithmetic]
-            move_vm_profiler::tracing_feature_enabled! {
-                use move_vm_profiler::GasProfiler;
-                use move_vm_types::gas::GasMeter;
-                use crate::gas_meter::SuiGasMeter;
-
-                let ref_context: &RefCell<TxContext> = tx_context.borrow();
-                let tx_digest = ref_context.borrow().digest();
-                let remaining_gas: u64 = move_vm_types::gas::GasMeter::remaining_gas(&SuiGasMeter(
-                    gas_charger.move_gas_status_mut(),
-                ))
-                        .into();
-                SuiGasMeter(gas_charger.move_gas_status_mut()).set_profiler(GasProfiler::init(
-                        &vm.config().profiler_config,
-                        format!("{}", tx_digest),
-                        remaining_gas,
-                    ));
-            }
 
             Ok(Self {
                 protocol_config,
@@ -938,6 +919,8 @@ mod checked {
                 loaded_child_objects,
                 mut created_object_ids,
                 deleted_object_ids,
+                settlement_input_sui,
+                settlement_output_sui,
             } = object_runtime.finish()?;
             assert_invariant!(
                 remaining_events.is_empty(),
@@ -1047,6 +1030,8 @@ mod checked {
                 deleted_object_ids,
                 user_events,
                 accumulator_events,
+                settlement_input_sui,
+                settlement_output_sui,
             )
         }
 
@@ -1434,6 +1419,8 @@ mod checked {
         deleted_object_ids: IndexSet<ObjectID>,
         user_events: Vec<(ModuleId, StructTag, Vec<u8>)>,
         accumulator_events: Vec<MoveAccumulatorEvent>,
+        settlement_input_sui: u64,
+        settlement_output_sui: u64,
     ) -> Result<ExecutionResults, ExecutionError> {
         // Before finishing, ensure that any shared object taken by value by the transaction is either:
         // 1. Mutated (and still has a shared ownership); or
@@ -1561,7 +1548,10 @@ mod checked {
                         value,
                     };
 
-                    AccumulatorEvent::new(accum_event.accumulator_id, write)
+                    AccumulatorEvent::new(
+                        AccumulatorObjId::new_unchecked(accum_event.accumulator_id),
+                        write,
+                    )
                 }
             })
             .collect();
@@ -1576,6 +1566,8 @@ mod checked {
             deleted_object_ids: deleted_object_ids.into_iter().collect(),
             user_events,
             accumulator_events,
+            settlement_input_sui,
+            settlement_output_sui,
         }))
     }
 
@@ -1849,7 +1841,7 @@ mod checked {
                 input_object_map,
                 obj_arg,
             )?,
-            CallArg::BalanceWithdraw(_) => {
+            CallArg::FundsWithdrawal(_) => {
                 // TODO(address-balances): Add support for balance withdraws.
                 InputValue::new_balance_withdraw()
             }

@@ -16,7 +16,7 @@ use tidehunter::metrics::Metrics;
 pub use tidehunter::{
     key_shape::{KeyIndexing, KeyShapeBuilder, KeySpaceConfig, KeyType},
     minibytes::Bytes,
-    IndexWalPosition, WalPosition,
+    Decision, IndexWalPosition, WalPosition,
 };
 use typed_store_error::TypedStoreError;
 
@@ -79,6 +79,14 @@ fn thdb_config() -> Config {
         max_maps: 8, // 8Gb of mapped space
         ..Config::default()
     }
+}
+
+pub fn default_mutex_count() -> usize {
+    1024
+}
+
+pub fn default_value_cache_size() -> usize {
+    2000
 }
 
 pub(crate) fn apply_range_bounds(

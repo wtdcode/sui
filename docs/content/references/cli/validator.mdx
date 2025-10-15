@@ -8,7 +8,9 @@ The Sui CLI `validator` command provides command-level access to validator featu
 
 ## Commands
 
-Typing `sui validator --help` into your terminal or console displays the following information on available commands.
+```sh
+$ sui validator --help
+```
 
 ```sh
 Usage: sui validator [OPTIONS] [COMMAND]
@@ -146,7 +148,7 @@ A8z83EqjmgwRNFV6sme6A5tTTTQPjiLgiW76neyvhLud
 
 ### Set gas price for the next epoch
 
-{@include: ../../snippets/info-gas-budget.mdx}
+<ImportContent source="info-gas-budget.mdx" mode="snippet" />
 
 ```sh
 $ sui validator request_set_gas_price --args 0x5 \"42\" --gas-budget GAS-BUDGET-AMOUNT>
