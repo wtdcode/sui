@@ -22,8 +22,10 @@ mod checked {
         native_functions::NativeFunctionTable,
     };
     use mysten_common::debug_fatal;
+    use sui_move_natives::test_scenario::InMemoryTestStore;
     use sui_move_natives::{object_runtime, transaction_context::TransactionContext};
     use sui_types::error::SuiErrorKind;
+    use sui_types::in_memory_storage::InMemoryStorage;
     use sui_types::metrics::BytecodeVerifierMetrics;
     use sui_verifier::check_for_verifier_timeout;
     use tracing::instrument;
@@ -91,6 +93,12 @@ mod checked {
         ));
         extensions.add(NativesCostTable::from_protocol_config(protocol_config));
         extensions.add(TransactionContext::new(tx_context));
+        #[cfg(feature = "testing")]
+        {
+            // Movy: sui-execution relies on this for natives like end_transaction,
+            //       which is super insance.
+            extensions.add(InMemoryTestStore(InMemoryStorage::default()));
+        }
         extensions
     }
 

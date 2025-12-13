@@ -81,11 +81,11 @@ impl Test {
 }
 
 // Create a separate test store per-thread.
-thread_local! {
-    static TEST_STORE_INNER: RefCell<InMemoryStorage> = RefCell::new(InMemoryStorage::default());
-}
+// thread_local! {
+//     static TEST_STORE_INNER: RefCell<InMemoryStorage> = RefCell::new(InMemoryStorage::default());
+// }
 
-static TEST_STORE: Lazy<InMemoryTestStore> = Lazy::new(|| InMemoryTestStore(&TEST_STORE_INNER));
+// static TEST_STORE: Lazy<InMemoryTestStore> = Lazy::new(|| InMemoryTestStore(&TEST_STORE_INNER));
 
 static SET_EXTENSION_HOOK: Lazy<()> =
     Lazy::new(|| set_extension_hook(Box::new(new_testing_object_and_natives_cost_runtime)));
@@ -135,20 +135,20 @@ pub async fn run_move_unit_tests(
 
 fn new_testing_object_and_natives_cost_runtime(ext: &mut NativeContextExtensions) {
     // Use a throwaway metrics registry for testing.
-    let registry = prometheus::Registry::new();
-    let metrics = Arc::new(LimitsMetrics::new(&registry));
-    let store = Lazy::force(&TEST_STORE);
+    // let registry = prometheus::Registry::new();
+    // let metrics = Arc::new(LimitsMetrics::new(&registry));
+    // let store = Lazy::force(&TEST_STORE);
     let protocol_config = ProtocolConfig::get_for_max_version_UNSAFE();
 
-    ext.add(ObjectRuntime::new(
-        store,
-        BTreeMap::new(),
-        false,
-        Box::leak(Box::new(ProtocolConfig::get_for_max_version_UNSAFE())), // leak for testing
-        metrics,
-        0, // epoch id
-    ));
-    ext.add(NativesCostTable::from_protocol_config(&protocol_config));
+    // ext.add(ObjectRuntime::new(
+    //     store,
+    //     BTreeMap::new(),
+    //     false,
+    //     Box::leak(Box::new(ProtocolConfig::get_for_max_version_UNSAFE())), // leak for testing
+    //     metrics,
+    //     0, // epoch id
+    // ));
+    // ext.add(NativesCostTable::from_protocol_config(&protocol_config));
     let tx_context = TxContext::new_from_components(
         &SuiAddress::ZERO,
         &TransactionDigest::default(),
@@ -163,5 +163,5 @@ fn new_testing_object_and_natives_cost_runtime(ext: &mut NativeContextExtensions
     ext.add(TransactionContext::new_for_testing(Rc::new(RefCell::new(
         tx_context,
     ))));
-    ext.add(store);
+    // ext.add(store);
 }

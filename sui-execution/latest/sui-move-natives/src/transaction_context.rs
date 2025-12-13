@@ -27,7 +27,10 @@ impl TransactionContext {
     pub fn new(tx_context: Rc<RefCell<TxContext>>) -> Self {
         Self {
             tx_context,
-            test_only: false,
+            #[cfg(feature = "testing")]
+            test_only: true, // Movy: always allow test contest
+            #[cfg(not(feature = "testing"))]
+            test_only: false
         }
     }
 

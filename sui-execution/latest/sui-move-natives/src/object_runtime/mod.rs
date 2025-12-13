@@ -649,6 +649,33 @@ pub fn max_event_error(max_events: u64) -> PartialVMError {
 }
 
 impl ObjectRuntimeState {
+    pub fn deep_copy(&self) -> PartialVMResult<Self> {
+        let mut transfers = IndexMap::new();
+        for (k, v) in self.transfers.iter() {
+            let owner = v.0.clone();
+            let ty = v.1.clone();
+            let val = v.2.copy_value()?;
+            transfers.insert(*k, (owner, ty, val));
+        }
+        let mut events = vec![];
+        for (st, ev) in self.events.iter() {
+            let ev = ev.copy_value()?;
+            events.push((st.clone(), ev));
+        }
+        Ok(Self {
+            input_objects: self.input_objects.clone(),
+            new_ids: self.new_ids.clone(),
+            generated_ids: self.generated_ids.clone(),
+            deleted_ids: self.deleted_ids.clone(),
+            transfers: transfers,
+            events: events,
+            accumulator_events: self.accumulator_events.clone(),
+            total_events_size: self.total_events_size,
+            received: self.received.clone(),
+            settlement_input_sui: self.settlement_input_sui,
+            settlement_output_sui: self.settlement_output_sui
+        })
+    }
     /// Update `state_view` with the effects of successfully executing a transaction:
     /// - Given the effects `Op<Value>` of child objects, processes the changes in terms of
     ///   object writes/deletes

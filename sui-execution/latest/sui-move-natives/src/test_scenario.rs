@@ -55,8 +55,9 @@ type Set<K> = IndexSet<K>;
 /// allows this to be used by both the object runtime (for reading) and the test scenario (for
 /// writing) while hiding mutability.
 #[derive(Tid)]
-pub struct InMemoryTestStore(pub &'static LocalKey<RefCell<InMemoryStorage>>);
-impl<'a> NativeExtensionMarker<'a> for &'a InMemoryTestStore {}
+pub struct InMemoryTestStore(pub InMemoryStorage);
+impl<'a> NativeExtensionMarker<'a> for InMemoryTestStore {}
+
 
 impl ChildObjectResolver for InMemoryTestStore {
     fn read_child_object(
@@ -65,8 +66,7 @@ impl ChildObjectResolver for InMemoryTestStore {
         child: &ObjectID,
         child_version_upper_bound: SequenceNumber,
     ) -> sui_types::error::SuiResult<Option<Object>> {
-        let l: &'static LocalKey<RefCell<InMemoryStorage>> = self.0;
-        l.with_borrow(|store| store.read_child_object(parent, child, child_version_upper_bound))
+        self.0.read_child_object(parent, child, child_version_upper_bound)
     }
 
     fn get_object_received_at_version(
@@ -76,14 +76,12 @@ impl ChildObjectResolver for InMemoryTestStore {
         receive_object_at_version: SequenceNumber,
         epoch_id: sui_types::committee::EpochId,
     ) -> sui_types::error::SuiResult<Option<Object>> {
-        self.0.with_borrow(|store| {
-            store.get_object_received_at_version(
+        self.0.get_object_received_at_version(
                 owner,
                 receiving_object_id,
                 receive_object_at_version,
                 epoch_id,
             )
-        })
     }
 }
 
@@ -135,7 +133,13 @@ pub fn end_transaction(
         }
     }
 
-    let object_runtime_state = object_runtime_ref.take_state();
+    let object_runtime_state = match object_runtime_ref.state.deep_copy() {
+        Ok(state) => state,
+        Err(e) => {
+            tracing::error!("Movy fails to deep copy runtime state due to {}, but it is safe as we fallback to original path, though the effects are void.", e);
+            object_runtime_ref.take_state()
+        }
+    };
     // Determine writes and deletes
     // We pass the received objects since they should be viewed as "loaded" for the purposes of
     // calculating the effects of the transaction.
@@ -245,12 +249,13 @@ pub fn end_transaction(
         }
     }
 
+    // Movy: I believe the design is incorrect because the native
+    //       shall not couple with the undelying storage.
+
     // For any unused allocated tickets, remove them from the store.
-    let store: &&InMemoryTestStore = get_extension!(context)?;
+    let store: &mut InMemoryTestStore = get_extension_mut!(context)?;
     for id in unreceived {
-        if store
-            .0
-            .with_borrow_mut(|store| store.remove_object(id).is_none())
+        if store.0.remove_object(id).is_none()
         {
             return Ok(NativeResult::err(
                 context.gas_used(),
@@ -711,8 +716,8 @@ pub fn allocate_receiving_ticket_for_object(
     );
 
     // NB: Must be a `&&` reference since the extension stores a static ref to the object storage.
-    let store: &&InMemoryTestStore = get_extension!(context)?;
-    store.0.with_borrow_mut(|store| store.insert_object(object));
+    let store: &mut InMemoryTestStore = get_extension_mut!(context)?;
+    store.0.insert_object(object);
 
     Ok(NativeResult::ok(
         legacy_test_cost(),
@@ -742,10 +747,8 @@ pub fn deallocate_receiving_ticket_for_object(
     inventories.objects.insert(id, value);
 
     // Remove the object from storage. We should never hit this scenario either.
-    let store: &&InMemoryTestStore = get_extension!(context)?;
-    if store
-        .0
-        .with_borrow_mut(|store| store.remove_object(id).is_none())
+    let store: &mut InMemoryTestStore = get_extension_mut!(context)?;
+    if store.0.remove_object(id).is_none()
     {
         return Ok(NativeResult::err(
             context.gas_used(),

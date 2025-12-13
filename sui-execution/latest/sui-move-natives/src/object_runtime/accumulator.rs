@@ -4,7 +4,7 @@
 use move_core_types::account_address::AccountAddress;
 use sui_types::{TypeTag, base_types::ObjectID, effects::AccumulatorOperation};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MoveAccumulatorAction {
     Merge,
     Split,
@@ -19,14 +19,14 @@ impl MoveAccumulatorAction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MoveAccumulatorValue {
     U64(u64),
     // commit the nth event emitted by the transaction to an event stream
     EventRef(u64),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MoveAccumulatorEvent {
     // Note: accumulator_id is derived by hashing target and ty, but we include
     // both for simplicity.
