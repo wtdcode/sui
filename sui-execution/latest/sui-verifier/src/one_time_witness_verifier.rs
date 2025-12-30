@@ -103,8 +103,10 @@ pub fn verify_module(
             // witness type candidate and if instantiation does not happen in test code
 
             if !is_test_fun(fn_name, module, fn_info_map) {
-                verify_no_instantiations(module, fn_def, candidate_name, def)
-                    .map_err(verification_failure)?;
+                // Movy: Sui seems no longer ship FnInfo with compiled modules so this is always checked. (they instead disallow
+                // packages with test to be published.)
+                // verify_no_instantiations(module, fn_def, candidate_name, def)
+                //     .map_err(verification_failure)?;
             }
         }
     }
