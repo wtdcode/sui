@@ -69,7 +69,7 @@ mod object;
 pub mod object_runtime;
 mod test_scenario;
 mod test_utils;
-mod transfer;
+pub mod transfer; // Movy: alloy access raw transfer natives
 mod tx_context;
 mod types;
 mod validator;
