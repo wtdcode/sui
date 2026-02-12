@@ -86,7 +86,7 @@ mod random;
 pub mod test_scenario;
 mod test_utils;
 pub mod transaction_context;
-mod transfer;
+pub mod transfer;
 mod tx_context;
 mod types;
 mod validator;
