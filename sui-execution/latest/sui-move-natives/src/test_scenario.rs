@@ -328,12 +328,11 @@ pub fn end_transaction(
     for (config, setting, ty, value) in config_settings {
         object_runtime_ref.config_setting_cache_update(config, setting, ty, value)
     }
-    object_runtime_ref.state.input_objects = object_runtime_ref
+    object_runtime_ref.state.input_objects.extend(object_runtime_ref
         .test_inventories
         .taken
         .iter()
-        .map(|(id, owner)| (*id, owner.clone()))
-        .collect::<BTreeMap<_, _>>();
+        .map(|(id, owner)| (*id, owner.clone())));
     // update inventories
     // check for bad updates to immutable values
     for (id, (ty, value)) in new_object_values {
