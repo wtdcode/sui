@@ -978,6 +978,7 @@ impl<'env, 'pc, 'vm, 'state, 'linkage, 'gas> Context<'env, 'pc, 'vm, 'state, 'li
         mut modules: Vec<CompiledModule>,
         dep_ids: &[ObjectID],
         current_package_id: ObjectID,
+        requested_storage_id: Option<ObjectID>,
         upgrade_ticket_policy: u8,
         linkage: ResolvedLinkage,
     ) -> Result<ObjectID, ExecutionError> {
@@ -991,7 +992,16 @@ impl<'env, 'pc, 'vm, 'state, 'linkage, 'gas> Context<'env, 'pc, 'vm, 'state, 'li
         // It should be fine that this does not go through the object runtime since it does not
         // need to know about new packages created, since Move objects and Move packages
         // cannot interact
-        let storage_id = self.tx_context.borrow_mut().fresh_id();
+        let storage_id = if let Some(target_storage_id) = requested_storage_id {
+            legacy_ptb::execution::validate_requested_upgrade_storage_id(
+                &*self.env.state_view,
+                current_package_id,
+                target_storage_id,
+            )?;
+            target_storage_id
+        } else {
+            self.tx_context.borrow_mut().fresh_id()
+        };
 
         let dependencies = self.fetch_packages(dep_ids)?;
         let package = current_move_package.new_upgraded(

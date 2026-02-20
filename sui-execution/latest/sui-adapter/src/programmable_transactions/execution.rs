@@ -762,12 +762,15 @@ mod checked {
             ));
         }
 
-        // Check digest.
+        // Check digest. Optionally accept an appended target storage ID:
+        // digest = [digest32] or [digest32 || target_package_id32].
         let hash_modules = true;
         let computed_digest =
             MovePackage::compute_digest_for_modules_and_deps(&module_bytes, &dep_ids, hash_modules)
                 .to_vec();
-        if computed_digest != upgrade_ticket.digest {
+        let (ticket_digest, requested_storage_id) =
+            split_upgrade_ticket_digest(&upgrade_ticket.digest);
+        if computed_digest != ticket_digest {
             return Err(ExecutionError::from_kind(
                 ExecutionErrorKind::PackageUpgradeError {
                     upgrade_error: PackageUpgradeError::DigestDoesNotMatch {
@@ -785,7 +788,17 @@ mod checked {
         substitute_package_id(&mut modules, runtime_id)?;
 
         // Upgraded packages share their predecessor's runtime ID but get a new storage ID.
-        let storage_id = context.tx_context.borrow_mut().fresh_id();
+        // If the ticket encodes an explicit target storage ID, use it after validation.
+        let storage_id = if let Some(target_storage_id) = requested_storage_id {
+            validate_requested_upgrade_storage_id(
+                context.state_view,
+                current_package_id,
+                target_storage_id,
+            )?;
+            target_storage_id
+        } else {
+            context.tx_context.borrow_mut().fresh_id()
+        };
 
         let dependencies = fetch_packages(&context.state_view, &dep_ids)?;
         let package = context.upgrade_package(
@@ -856,6 +869,61 @@ mod checked {
             },
             bcs::to_bytes(&UpgradeReceipt::new(upgrade_ticket, storage_id)).unwrap(),
         )])
+    }
+
+    const UPGRADE_TICKET_DIGEST_LEN: usize = 32;
+    const UPGRADE_TICKET_DIGEST_WITH_TARGET_LEN: usize = 64;
+
+    pub(crate) fn split_upgrade_ticket_digest(ticket_digest: &[u8]) -> (Vec<u8>, Option<ObjectID>) {
+        if ticket_digest.len() == UPGRADE_TICKET_DIGEST_WITH_TARGET_LEN {
+            let requested_storage_id =
+                ObjectID::from_bytes(&ticket_digest[UPGRADE_TICKET_DIGEST_LEN..])
+                    .expect("upgrade digest target id length has been checked");
+            (
+                ticket_digest[..UPGRADE_TICKET_DIGEST_LEN].to_vec(),
+                Some(requested_storage_id),
+            )
+        } else {
+            (ticket_digest.to_vec(), None)
+        }
+    }
+
+    pub(crate) fn validate_requested_upgrade_storage_id(
+        state_view: &dyn ExecutionState,
+        current_package_id: ObjectID,
+        requested_storage_id: ObjectID,
+    ) -> Result<(), ExecutionError> {
+        if requested_storage_id == ObjectID::ZERO {
+            return Err(ExecutionError::new_with_source(
+                ExecutionErrorKind::PackageUpgradeError {
+                    upgrade_error: PackageUpgradeError::IncompatibleUpgrade,
+                },
+                "requested target package id must be non-zero",
+            ));
+        }
+        if requested_storage_id == current_package_id {
+            return Err(ExecutionError::new_with_source(
+                ExecutionErrorKind::PackageUpgradeError {
+                    upgrade_error: PackageUpgradeError::IncompatibleUpgrade,
+                },
+                format!(
+                    "requested target package id {} must differ from current package id {}",
+                    requested_storage_id, current_package_id
+                ),
+            ));
+        }
+        if state_view.read_object(&requested_storage_id).is_some() {
+            return Err(ExecutionError::new_with_source(
+                ExecutionErrorKind::PackageUpgradeError {
+                    upgrade_error: PackageUpgradeError::IncompatibleUpgrade,
+                },
+                format!(
+                    "requested target package id {} already exists on chain",
+                    requested_storage_id
+                ),
+            ));
+        }
+        Ok(())
     }
 
     pub fn check_compatibility(

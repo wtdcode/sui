@@ -4,7 +4,7 @@
 use crate::{
     execution_mode::ExecutionMode,
     gas_charger::GasCharger,
-    sp,
+    programmable_transactions as legacy_ptb, sp,
     static_programmable_transactions::{
         env::Env,
         execution::context::{Context, CtxValue},
@@ -354,7 +354,9 @@ fn execute_command<Mode: ExecutionMode>(
                 /* hash_modules */ true,
             )
             .to_vec();
-            if computed_digest != upgrade_ticket.digest {
+            let (ticket_digest, requested_storage_id) =
+                legacy_ptb::execution::split_upgrade_ticket_digest(&upgrade_ticket.digest);
+            if computed_digest != ticket_digest {
                 return Err(ExecutionError::from_kind(
                     ExecutionErrorKind::PackageUpgradeError {
                         upgrade_error: PackageUpgradeError::DigestDoesNotMatch {
@@ -368,6 +370,7 @@ fn execute_command<Mode: ExecutionMode>(
                 modules,
                 &dep_ids,
                 current_package_id,
+                requested_storage_id,
                 upgrade_ticket.policy,
                 linkage,
             )?;
