@@ -779,6 +779,7 @@ impl<'env, 'pc, 'vm, 'state, 'linkage, 'gas> Context<'env, 'pc, 'vm, 'state, 'li
         for id in &dependency_ids {
             match self.env.linkable_store.get_package(id) {
                 Err(e) => {
+                    tracing::warn!("dependency {} missing due to error {}", id, e);
                     return Err(ExecutionError::new_with_source(
                         ExecutionErrorKind::PublishUpgradeMissingDependency,
                         e,
@@ -936,6 +937,9 @@ impl<'env, 'pc, 'vm, 'state, 'linkage, 'gas> Context<'env, 'pc, 'vm, 'state, 'li
         let runtime_id = if <Mode>::packages_are_predefined() {
             // do not calculate or substitute id for predefined packages
             (*modules[0].self_id().address()).into()
+        } else if let Some(id) = Mode::targeted_deployment(&self.tx_context.borrow().digest()) {
+            adapter::substitute_package_id(&mut modules, id)?;
+            id
         } else {
             // It should be fine that this does not go through the object runtime since it does not
             // need to know about new packages created, since Move objects and Move packages
@@ -973,7 +977,7 @@ impl<'env, 'pc, 'vm, 'state, 'linkage, 'gas> Context<'env, 'pc, 'vm, 'state, 'li
         }
     }
 
-    pub fn upgrade(
+    pub fn upgrade<Mode: ExecutionMode>(
         &mut self,
         mut modules: Vec<CompiledModule>,
         dep_ids: &[ObjectID],
@@ -991,7 +995,12 @@ impl<'env, 'pc, 'vm, 'state, 'linkage, 'gas> Context<'env, 'pc, 'vm, 'state, 'li
         // It should be fine that this does not go through the object runtime since it does not
         // need to know about new packages created, since Move objects and Move packages
         // cannot interact
-        let storage_id = self.tx_context.borrow_mut().fresh_id();
+        let storage_id =
+            if let Some(id) = Mode::targeted_deployment(&self.tx_context.borrow().digest()) {
+                id
+            } else {
+                self.tx_context.borrow_mut().fresh_id()
+            };
 
         let dependencies = self.fetch_packages(dep_ids)?;
         let package = current_move_package.new_upgraded(

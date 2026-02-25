@@ -16,7 +16,8 @@ use move_core_types::account_address::AccountAddress;
 use move_trace_format::format::MoveTraceBuilder;
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
 use sui_types::{
-    base_types::TxContext,
+    base_types::{ObjectID, TxContext},
+    digests::Digest,
     error::{ExecutionError, ExecutionErrorKind},
     execution::{ExecutionTiming, ResultWithTimings},
     execution_status::PackageUpgradeError,
@@ -336,6 +337,11 @@ fn execute_command<Mode: ExecutionMode>(
                 .into_upgrade_ticket()?;
             // Make sure the passed-in package ID matches the package ID in the `upgrade_ticket`.
             if current_package_id != upgrade_ticket.package.bytes {
+                tracing::warn!(
+                    "unmatched {} vs {}",
+                    current_package_id,
+                    upgrade_ticket.package.bytes
+                );
                 return Err(ExecutionError::from_kind(
                     ExecutionErrorKind::PackageUpgradeError {
                         upgrade_error: PackageUpgradeError::PackageIDDoesNotMatch {
@@ -355,6 +361,11 @@ fn execute_command<Mode: ExecutionMode>(
             )
             .to_vec();
             if computed_digest != upgrade_ticket.digest {
+                tracing::warn!(
+                    "Digest mismatched: computed: {}, ticket: {}",
+                    Digest::new(computed_digest.clone().try_into().unwrap()),
+                    Digest::new(upgrade_ticket.digest.clone().try_into().unwrap())
+                );
                 return Err(ExecutionError::from_kind(
                     ExecutionErrorKind::PackageUpgradeError {
                         upgrade_error: PackageUpgradeError::DigestDoesNotMatch {
@@ -364,7 +375,7 @@ fn execute_command<Mode: ExecutionMode>(
                 ));
             }
 
-            let upgraded_package_id = context.upgrade(
+            let upgraded_package_id = context.upgrade::<Mode>(
                 modules,
                 &dep_ids,
                 current_package_id,

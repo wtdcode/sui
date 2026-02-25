@@ -133,9 +133,14 @@ impl ModuleResolver for LinkedDataStore<'_> {
     type Error = SuiError;
 
     fn get_module(&self, id: &ModuleId) -> Result<Option<Vec<u8>>, Self::Error> {
-        self.load_module(id)
-            .map(Some)
-            .map_err(|_| SuiError::from(ExecutionErrorKind::VMVerificationOrDeserializationError))
+        self.load_module(id).map(Some).map_err(|_| {
+            tracing::warn!(
+                "ModuleResolver fails with fetching {}::{}",
+                id.address(),
+                id.name().to_string()
+            );
+            SuiError::from(ExecutionErrorKind::VMVerificationOrDeserializationError)
+        })
     }
 }
 

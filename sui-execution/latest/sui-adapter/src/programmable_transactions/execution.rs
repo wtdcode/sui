@@ -58,9 +58,12 @@ mod checked {
             TxContext, TxContextKind,
         },
         coin::Coin,
+        digests::Digest,
         error::{ExecutionError, ExecutionErrorKind, command_argument_error},
         execution::{ExecutionTiming, ResultWithTimings},
-        execution_status::{CommandArgumentError, PackageUpgradeError, TypeArgumentError},
+        execution_status::{
+            CommandArgumentError, ExecutionFailureStatus, PackageUpgradeError, TypeArgumentError,
+        },
         id::RESOLVED_SUI_ID,
         metrics::LimitsMetrics,
         move_package::{
@@ -667,6 +670,8 @@ mod checked {
         let runtime_id = if Mode::packages_are_predefined() {
             // do not calculate or substitute id for predefined packages
             (*modules[0].self_id().address()).into()
+        } else if let Some(id) = Mode::targeted_deployment(&context.tx_context.borrow().digest()) {
+            id
         } else {
             let id = context.tx_context.borrow_mut().fresh_id();
             substitute_package_id(&mut modules, id)?;
@@ -768,6 +773,11 @@ mod checked {
             MovePackage::compute_digest_for_modules_and_deps(&module_bytes, &dep_ids, hash_modules)
                 .to_vec();
         if computed_digest != upgrade_ticket.digest {
+            tracing::warn!(
+                "expected digest: {}, ticket digest: {}",
+                Digest::new(computed_digest.clone().try_into().unwrap()),
+                Digest::new(upgrade_ticket.digest.clone().try_into().unwrap()),
+            );
             return Err(ExecutionError::from_kind(
                 ExecutionErrorKind::PackageUpgradeError {
                     upgrade_error: PackageUpgradeError::DigestDoesNotMatch {
@@ -785,7 +795,12 @@ mod checked {
         substitute_package_id(&mut modules, runtime_id)?;
 
         // Upgraded packages share their predecessor's runtime ID but get a new storage ID.
-        let storage_id = context.tx_context.borrow_mut().fresh_id();
+        let storage_id =
+            if let Some(id) = Mode::targeted_deployment(&context.tx_context.borrow().digest()) {
+                id
+            } else {
+                context.tx_context.borrow_mut().fresh_id()
+            };
 
         let dependencies = fetch_packages(&context.state_view, &dep_ids)?;
         let package = context.upgrade_package(
@@ -839,6 +854,7 @@ mod checked {
                 })
             });
             if new_module_has_init {
+                tracing::warn!("new module has init...");
                 // TODO we cannot run 'init' on upgrade yet due to global type cache limitations
                 return Err(ExecutionError::new_with_source(
                     ExecutionErrorKind::FeatureNotYetSupported,

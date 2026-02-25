@@ -58,7 +58,6 @@ type Set<K> = IndexSet<K>;
 pub struct InMemoryTestStore(pub InMemoryStorage);
 impl<'a> NativeExtensionMarker<'a> for InMemoryTestStore {}
 
-
 impl ChildObjectResolver for InMemoryTestStore {
     fn read_child_object(
         &self,
@@ -66,7 +65,8 @@ impl ChildObjectResolver for InMemoryTestStore {
         child: &ObjectID,
         child_version_upper_bound: SequenceNumber,
     ) -> sui_types::error::SuiResult<Option<Object>> {
-        self.0.read_child_object(parent, child, child_version_upper_bound)
+        self.0
+            .read_child_object(parent, child, child_version_upper_bound)
     }
 
     fn get_object_received_at_version(
@@ -77,11 +77,11 @@ impl ChildObjectResolver for InMemoryTestStore {
         epoch_id: sui_types::committee::EpochId,
     ) -> sui_types::error::SuiResult<Option<Object>> {
         self.0.get_object_received_at_version(
-                owner,
-                receiving_object_id,
-                receive_object_at_version,
-                epoch_id,
-            )
+            owner,
+            receiving_object_id,
+            receive_object_at_version,
+            epoch_id,
+        )
     }
 }
 
@@ -136,7 +136,10 @@ pub fn end_transaction(
     let object_runtime_state = match object_runtime_ref.state.deep_copy() {
         Ok(state) => state,
         Err(e) => {
-            tracing::error!("Movy fails to deep copy runtime state due to {}, but it is safe as we fallback to original path, though the effects are void.", e);
+            tracing::error!(
+                "Movy fails to deep copy runtime state due to {}, but it is safe as we fallback to original path, though the effects are void.",
+                e
+            );
             object_runtime_ref.take_state()
         }
     };
@@ -255,8 +258,7 @@ pub fn end_transaction(
     // For any unused allocated tickets, remove them from the store.
     let store: &mut InMemoryTestStore = get_extension_mut!(context)?;
     for id in unreceived {
-        if store.0.remove_object(id).is_none()
-        {
+        if store.0.remove_object(id).is_none() {
             return Ok(NativeResult::err(
                 context.gas_used(),
                 E_UNABLE_TO_DEALLOCATE_RECEIVING_TICKET,
@@ -328,11 +330,13 @@ pub fn end_transaction(
     for (config, setting, ty, value) in config_settings {
         object_runtime_ref.config_setting_cache_update(config, setting, ty, value)
     }
-    object_runtime_ref.state.input_objects.extend(object_runtime_ref
-        .test_inventories
-        .taken
-        .iter()
-        .map(|(id, owner)| (*id, owner.clone())));
+    object_runtime_ref.state.input_objects.extend(
+        object_runtime_ref
+            .test_inventories
+            .taken
+            .iter()
+            .map(|(id, owner)| (*id, owner.clone())),
+    );
     // update inventories
     // check for bad updates to immutable values
     for (id, (ty, value)) in new_object_values {
@@ -747,8 +751,7 @@ pub fn deallocate_receiving_ticket_for_object(
 
     // Remove the object from storage. We should never hit this scenario either.
     let store: &mut InMemoryTestStore = get_extension_mut!(context)?;
-    if store.0.remove_object(id).is_none()
-    {
+    if store.0.remove_object(id).is_none() {
         return Ok(NativeResult::err(
             context.gas_used(),
             E_UNABLE_TO_DEALLOCATE_RECEIVING_TICKET,

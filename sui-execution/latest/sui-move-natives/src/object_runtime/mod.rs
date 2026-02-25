@@ -667,15 +667,15 @@ impl ObjectRuntimeState {
             new_ids: self.new_ids.clone(),
             generated_ids: self.generated_ids.clone(),
             deleted_ids: self.deleted_ids.clone(),
-            transfers: transfers,
-            events: events,
+            transfers,
+            events,
             accumulator_events: self.accumulator_events.clone(),
             total_events_size: self.total_events_size,
             received: self.received.clone(),
             settlement_input_sui: self.settlement_input_sui,
             settlement_output_sui: self.settlement_output_sui,
             accumulator_merge_totals: self.accumulator_merge_totals.clone(),
-            accumulator_split_totals: self.accumulator_split_totals.clone()
+            accumulator_split_totals: self.accumulator_split_totals.clone(),
         })
     }
     /// Update `state_view` with the effects of successfully executing a transaction:

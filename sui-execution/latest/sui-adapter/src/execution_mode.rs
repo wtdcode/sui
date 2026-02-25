@@ -4,6 +4,8 @@
 use crate::execution_value::{RawValueType, Value};
 use crate::type_resolver::TypeTagResolver;
 use move_core_types::language_storage::TypeTag;
+use sui_types::base_types::ObjectID;
+use sui_types::digests::TransactionDigest;
 use sui_types::{
     error::ExecutionError, execution::ExecutionResult, transaction::Argument, transfer::Receiving,
 };
@@ -15,6 +17,11 @@ pub trait ExecutionMode {
     type ArgumentUpdates;
     /// the gathered results from batched executions
     type ExecutionResults;
+
+    /// Controls if we enabled targeted deployment
+    fn targeted_deployment(digest: &TransactionDigest) -> Option<ObjectID> {
+        None
+    }
 
     /// Controls the calling of arbitrary Move functions
     fn allow_arbitrary_function_calls() -> bool;

@@ -121,9 +121,17 @@ pub(crate) fn get_package(
     store
         .get_package(object_id)
         .map_err(|e| {
+            tracing::warn!(
+                "Fail to get package for {} from store due to {}",
+                object_id,
+                e
+            );
             ExecutionError::new_with_source(ExecutionErrorKind::PublishUpgradeMissingDependency, e)
         })?
-        .ok_or_else(|| ExecutionError::from_kind(ExecutionErrorKind::InvalidLinkage))
+        .ok_or_else(|| {
+            tracing::warn!("package missing for {} from store", object_id);
+            ExecutionError::from_kind(ExecutionErrorKind::InvalidLinkage)
+        })
 }
 
 // Add a package to the unification table, unifying it with any existing package in the table.

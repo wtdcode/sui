@@ -690,6 +690,7 @@ fn build_linkage_table<'p>(
             );
 
             if existing.is_some() {
+                tracing::warn!("invalid linkage: {:?} for {}", existing, original_id);
                 return Err(ExecutionErrorKind::InvalidLinkage.into());
             }
         } else {
@@ -709,6 +710,7 @@ fn build_linkage_table<'p>(
     }
     // (1) Every dependency is represented in the transitive dependencies
     if !immediate_dependencies.is_empty() {
+        tracing::warn!("imm deps not empty: {:?}", &immediate_dependencies);
         return Err(ExecutionErrorKind::PublishUpgradeMissingDependency.into());
     }
 
@@ -716,10 +718,12 @@ fn build_linkage_table<'p>(
     for dep_linkage_table in dep_linkage_tables {
         for (original_id, dep_info) in dep_linkage_table {
             let Some(our_info) = linkage_table.get(original_id) else {
+                tracing::warn!("our_info not at {}", original_id);
                 return Err(ExecutionErrorKind::PublishUpgradeMissingDependency.into());
             };
 
             if our_info.upgraded_version < dep_info.upgraded_version {
+                tracing::warn!("{}: our: {:?}, dep: {:?}", original_id, our_info, dep_info);
                 return Err(ExecutionErrorKind::PublishUpgradeDependencyDowngrade.into());
             }
         }

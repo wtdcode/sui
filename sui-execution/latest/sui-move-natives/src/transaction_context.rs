@@ -30,7 +30,7 @@ impl TransactionContext {
             #[cfg(feature = "testing")]
             test_only: true, // Movy: always allow test contest
             #[cfg(not(feature = "testing"))]
-            test_only: false
+            test_only: false,
         }
     }
 
