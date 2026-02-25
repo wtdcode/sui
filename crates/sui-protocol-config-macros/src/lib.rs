@@ -255,7 +255,7 @@ pub fn protocol_config_override_macro(input: TokenStream) -> TokenStream {
         let field_name = &field.ident;
         quote! {
             if let Some(value) = self.#field_name {
-                tracing::warn!(
+                tracing::debug!(
                     "ProtocolConfig field \"{}\" has been overridden with the value: {value:?}",
                     stringify!(#field_name),
                 );

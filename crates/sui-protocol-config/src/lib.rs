@@ -2616,7 +2616,7 @@ impl ProtocolConfig {
 
         ret = CONFIG_OVERRIDE.with(|ovr| {
             if let Some(override_fn) = &*ovr.borrow() {
-                warn!(
+                tracing::debug!(
                     "overriding ProtocolConfig settings with custom settings (you should not see this log outside of tests)"
                 );
                 override_fn(version, ret)
@@ -2626,7 +2626,7 @@ impl ProtocolConfig {
         });
 
         if std::env::var("SUI_PROTOCOL_CONFIG_OVERRIDE_ENABLE").is_ok() {
-            warn!(
+            tracing::debug!(
                 "overriding ProtocolConfig settings with custom settings; this may break non-local networks"
             );
             let overrides: ProtocolConfigOptional =
