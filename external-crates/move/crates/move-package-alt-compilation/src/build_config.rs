@@ -121,6 +121,14 @@ pub struct BuildConfig {
     /// If set, any dependencies that are not published will have their address set to 0x0.
     #[clap(skip)]
     pub set_unpublished_deps_to_zero: bool,
+
+    /// Extra `.move` source files to compile into the ROOT package, on top of
+    /// those discovered under its `sources/` (and `tests/` in test mode) dirs.
+    /// Lets an external driver (e.g. an audit harness) inject a generated test
+    /// file that must compile in the root package's named-address scope without
+    /// copying it into the on-disk package. Only honored in `test_mode`.
+    #[clap(skip)]
+    pub extra_source_files: Vec<PathBuf>,
 }
 
 impl BuildConfig {

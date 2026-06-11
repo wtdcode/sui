@@ -390,10 +390,22 @@ pub fn make_deps_for_compiler<W: Write + Send, F: MoveFlavor>(
 
         debug!("Package name {:?} -- Safe name {:?}", name, safe_name);
         debug!("Named address map {:#?}", addresses);
+        let mut source_paths = get_sources(pkg.path(), build_config)?;
+        // Inject externally-supplied extra source files into the ROOT
+        // package's target set so they compile in its named-address scope
+        // (e.g. a generated `module <root_pkg>::test;`). Test-mode only:
+        // these are expected to carry `#[test]` / `#[test_only]` code.
+        if pkg.is_root() && build_config.test_mode {
+            source_paths.extend(
+                build_config
+                    .extra_source_files
+                    .iter()
+                    .map(|p| Symbol::from(p.to_string_lossy().as_ref())),
+            );
+        }
         let paths = PackagePaths {
             name: Some((safe_name, config)),
-            // paths: sources,
-            paths: get_sources(pkg.path(), build_config)?,
+            paths: source_paths,
             named_address_map: addresses.inner,
         };
 

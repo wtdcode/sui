@@ -86,15 +86,20 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
     /// 1. TODO: Fill this in! (deduplicate nodes etc)
     pub(crate) async fn validate_and_construct(mut config: PackageConfig) -> PackageResult<Self> {
         let input_path = PackagePath::new(config.input_path.clone())?;
-        let mutex = input_path.lock()?;
+        let output_path = OutputPath::new(config.output_path.clone())?;
+        // Lock keyed on the OUTPUT directory rather than the input. When
+        // output_path != input_path (a read-only source tree plus a
+        // private scratch/install dir) two concurrent loads of the SAME
+        // source with DISTINCT outputs must not serialize on a shared
+        // input-keyed lock. When they are equal (the default in-place
+        // build) this is identical to locking the input as before.
+        let mutex = output_path.lock()?;
 
         let ephemeral_file = config
             .load_type
             .ephemeral_file()
             .map(EphemeralPubfilePath::new)
             .transpose()?;
-
-        let output_path = OutputPath::new(config.output_path.clone())?;
 
         debug!(
             "creating RootPackage (CWD: {:?})\n{config:#?}",
